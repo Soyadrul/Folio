@@ -1,0 +1,639 @@
+# GitHub Actions Workflow for Multi-Platform Flutter Build and Release
+# This workflow builds Flutter apps for Linux and Android only
+# Triggers when commit message contains [BUILD]
+# Creates a draft GitHub release ONLY if commit contains both [BUILD] and [PUBLISH]
+
+name: Flutter Build and Release
+
+# Workflow Triggers
+on:
+  # Trigger on pushes to any branch (but ignore markdown file changes)
+  # Use [BUILD] in commit message to trigger builds
+  # Use [BUILD] + [PUBLISH] to create releases
+  push:
+    paths-ignore: ['**/*.md']
+
+  # Allow manual triggering from GitHub Actions tab
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'What do you want to do?'
+        required: true
+        type: choice
+        options:
+          - 'Build only (test compilation)'
+          - 'Build and publish release'
+        default: 'Build only (test compilation)'
+      version:
+        description: 'Release version (only if publishing, e.g., v1.0.0)'
+        required: false
+        default: ''
+
+jobs:
+  # ============================================================================
+  # JOB 1: Check if build should be triggered and if release should be created
+  # ============================================================================
+  check-trigger:
+    name: Check Build Trigger
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.check.outputs.should_build }}
+      should_publish: ${{ steps.check.outputs.should_publish }}
+      version: ${{ steps.version.outputs.version }}
+    
+    steps:
+    # Checkout repository to access commit history
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Fetch full history to read commit messages
+    
+    # Check if the commit message contains [BUILD] and/or [PUBLISH] trigger keywords
+    - name: Check for [BUILD] and [PUBLISH] triggers
+      id: check
+      run: |
+        # Extract the latest commit message
+        COMMIT_MSG="${{ github.event.head_commit.message }}"
+        
+        # Determine if this is a manual workflow dispatch
+        IS_MANUAL="${{ github.event_name == 'workflow_dispatch' }}"
+        
+        # Check if [BUILD] appears in the commit message or manual trigger
+        if [[ "$COMMIT_MSG" =~ \[BUILD\] ]] || [[ "$IS_MANUAL" == "true" ]]; then
+          echo "should_build=true" >> $GITHUB_OUTPUT
+          echo "✅ Build trigger detected"
+        else
+          echo "should_build=false" >> $GITHUB_OUTPUT
+          echo "⏭️  No build trigger found, skipping build"
+        fi
+        
+        # Check if BOTH [BUILD] and [PUBLISH] appear in the commit message
+        # OR if manual trigger is set to "Build and publish release"
+        if [[ "$COMMIT_MSG" =~ \[BUILD\] ]] && [[ "$COMMIT_MSG" =~ \[PUBLISH\] ]]; then
+          echo "should_publish=true" >> $GITHUB_OUTPUT
+          echo "✅ Publish trigger detected: Both [BUILD] and [PUBLISH] found in commit"
+          echo "📦 A GitHub release will be created after build completes"
+        elif [[ "$IS_MANUAL" == "true" ]] && [[ "${{ github.event.inputs.action }}" == "Build and publish release" ]]; then
+          echo "should_publish=true" >> $GITHUB_OUTPUT
+          echo "✅ Manual publish selected: Build and publish release"
+          echo "📦 A GitHub release will be created after build completes"
+        else
+          echo "should_publish=false" >> $GITHUB_OUTPUT
+          if [[ "$COMMIT_MSG" =~ \[BUILD\] ]] || [[ "$IS_MANUAL" == "true" ]]; then
+            echo "ℹ️  Build-only mode: Testing compilation without creating release"
+          fi
+          echo "ℹ️  To create a release, include both [BUILD] and [PUBLISH] in commit message"
+        fi
+    
+    # Determine the version number for this release
+    # Only required if publishing a release (not for build-only mode)
+    - name: Determine version number
+      id: version
+      run: |
+        # Check if we're publishing (need version) or just building (no version needed)
+        SHOULD_PUBLISH="${{ steps.check.outputs.should_publish }}"
+        
+        if [[ "$SHOULD_PUBLISH" == "false" ]]; then
+          # Build-only mode: No version needed, just testing compilation
+          echo "version=none" >> $GITHUB_OUTPUT
+          echo "ℹ️  Build-only mode: Version not required (no release will be created)"
+          exit 0
+        fi
+        
+        # Publishing mode: Version is required
+        echo "📦 Publishing mode: Determining release version..."
+        
+        # Check if manual trigger with version provided
+        IS_MANUAL="${{ github.event_name == 'workflow_dispatch' }}"
+        MANUAL_VERSION="${{ github.event.inputs.version }}"
+        
+        if [[ "$IS_MANUAL" == "true" ]] && [[ -n "$MANUAL_VERSION" ]]; then
+          # Use manually provided version
+          # Ensure it starts with 'v'
+          if [[ "$MANUAL_VERSION" =~ ^v ]]; then
+            VERSION="$MANUAL_VERSION"
+          else
+            VERSION="v$MANUAL_VERSION"
+          fi
+          echo "📝 Using manually specified version: $VERSION"
+        else
+          # Try to extract version from commit message
+          COMMIT_MSG="${{ github.event.head_commit.message }}"
+          
+          if [[ "$COMMIT_MSG" =~ v?([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+            # Found semantic version in commit message
+            VERSION="v${BASH_REMATCH[1]}"
+            echo "📝 Version extracted from commit message: $VERSION"
+          else
+            # No version found: Generate from current date and short commit SHA
+            VERSION="v$(date +'%Y.%m.%d')-${GITHUB_SHA::7}"
+            echo "⚠️  No version found in commit message"
+            echo "📝 Auto-generated version: $VERSION"
+            echo ""
+            echo "💡 Tip: Include version in commit message for releases:"
+            echo "   Example: git commit -m '[BUILD] [PUBLISH] v1.2.0 - New features'"
+          fi
+        fi
+        
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "✅ Release version will be: $VERSION"
+
+  # ============================================================================
+  # JOB 2: Build Flutter applications for Linux and Android only
+  # ============================================================================
+  build:
+    name: Build ${{ github.event.repository.name }}-${{ matrix.artifact_suffix }}
+    needs: check-trigger
+    # Only run this job if [BUILD] trigger was detected
+    if: needs.check-trigger.outputs.should_build == 'true'
+    runs-on: ${{ matrix.os }}
+    
+    strategy:
+      # Don't cancel other platform builds if one fails
+      fail-fast: false
+      
+      # Build matrix defining target platforms (Linux and Android only)
+      matrix:
+        include:
+          # Linux Desktop Application
+          - os: ubuntu-latest
+            target: linux
+            artifact_suffix: Linux
+            artifact_path: build/linux/x64/release/bundle/
+          
+          # Android Application (APK) - with release signing
+          - os: ubuntu-latest
+            target: android
+            artifact_suffix: Android
+            artifact_path: build/app/outputs/flutter-apk/app-release.apk
+    
+    steps:
+    # -------------------------------------------------------------------------
+    # Step 1: Checkout repository code
+    # -------------------------------------------------------------------------
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    # -------------------------------------------------------------------------
+    # Step 2: Set up Java for Android builds
+    # -------------------------------------------------------------------------
+    # Java Development Kit is required to compile Android applications
+    # Using Java 21 to match project requirements
+    # Only runs for Android target to save time on other platforms
+    - name: Set up Java (Android only)
+      if: matrix.target == 'android'
+      uses: actions/setup-java@v4
+      with:
+        java-version: '21'  # Android project requires Java 21
+        distribution: 'temurin'  # Eclipse Temurin is stable and well-supported
+
+    # -------------------------------------------------------------------------
+    # Step 2.1: Install Android build tools for signing verification
+    # -------------------------------------------------------------------------
+    # Android build tools are required to use apksigner for verifying APK signatures
+    - name: Install Android build tools (Android only)
+      if: matrix.target == 'android'
+      run: |
+        # List available build tools to debug the issue
+        echo "Listing available build tools directories:"
+        ls -la $ANDROID_HOME/build-tools/ || echo "Build tools directory does not exist or is empty"
+        
+        # Find the latest build tools version (with error checking)
+        if [ -d "$ANDROID_HOME/build-tools" ] && [ "$(ls -A $ANDROID_HOME/build-tools/)" ]; then
+          LATEST_BUILD_TOOLS=$(ls -1 $ANDROID_HOME/build-tools/ | sort -V | tail -n 1)
+          echo "Latest build tools version: $LATEST_BUILD_TOOLS"
+
+          # Add the build tools to PATH
+          echo "$ANDROID_HOME/build-tools/$LATEST_BUILD_TOOLS" >> $GITHUB_PATH
+
+          # Refresh the PATH environment for the current shell
+          export PATH="$PATH:$ANDROID_HOME/build-tools/$LATEST_BUILD_TOOLS"
+
+          # Verify apksigner is available
+          if command -v apksigner &> /dev/null; then
+            echo "apksigner found at: $(which apksigner)"
+            apksigner --version
+          else
+            echo "ERROR: apksigner not found in $ANDROID_HOME/build-tools/$LATEST_BUILD_TOOLS"
+            echo "Contents of $ANDROID_HOME/build-tools/$LATEST_BUILD_TOOLS:"
+            ls -la $ANDROID_HOME/build-tools/$LATEST_BUILD_TOOLS/
+            exit 1
+          fi
+        else
+          echo "Build tools directory is empty or doesn't exist. Installing build tools..."
+          
+          # Install Android SDK build tools using sdkmanager
+          echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "build-tools;34.0.0"
+          
+          # Add the specific build tools version to PATH
+          echo "$ANDROID_HOME/build-tools/34.0.0" >> $GITHUB_PATH
+          
+          # Refresh the PATH environment for the current shell
+          export PATH="$PATH:$ANDROID_HOME/build-tools/34.0.0"
+
+          # Verify apksigner is available
+          if command -v apksigner &> /dev/null; then
+            echo "apksigner found at: $(which apksigner)"
+            apksigner --version
+          else
+            echo "ERROR: apksigner not found in $ANDROID_HOME/build-tools/34.0.0"
+            echo "Contents of $ANDROID_HOME/build-tools/34.0.0:"
+            ls -la $ANDROID_HOME/build-tools/34.0.0/
+            exit 1
+          fi
+        fi
+
+    # -------------------------------------------------------------------------
+    # Step 3: Install Linux system dependencies
+    # -------------------------------------------------------------------------
+    # Flutter Linux apps require GTK3 libraries and build tools
+    # These are not included by default on Ubuntu runners
+    - name: Install Linux dependencies
+      if: matrix.target == 'linux'
+      run: |
+        sudo apt-get update -y
+        sudo apt-get install -y \
+          clang \
+          cmake \
+          ninja-build \
+          pkg-config \
+          libgtk-3-dev \
+          liblzma-dev \
+          libstdc++-12-dev
+
+    # -------------------------------------------------------------------------
+    # Step 4: Set up Flutter SDK
+    # -------------------------------------------------------------------------
+    # Downloads and configures the Flutter development environment
+    # Uses latest stable version to ensure compatibility with project requirements
+    # Caching enabled to speed up subsequent workflow runs
+    - name: Set up Flutter SDK
+      uses: subosito/flutter-action@v2
+      with:
+        channel: 'stable'  # Always use latest stable Flutter version
+        cache: true  # Cache Flutter SDK between runs
+
+    # -------------------------------------------------------------------------
+    # Step 5: Install Flutter project dependencies
+    # -------------------------------------------------------------------------
+    # Downloads all packages specified in pubspec.yaml
+    - name: Get Flutter dependencies
+      run: flutter pub get
+
+    # -------------------------------------------------------------------------
+    # Step 6: Build application for target platform
+    # -------------------------------------------------------------------------
+    # Each platform has its own build command and configuration
+    # Android build REQUIRES release signing - will fail if secrets not configured
+    - name: Build ${{ matrix.target }} application
+      shell: bash  # Use bash on all platforms for consistent scripting
+      env:
+        # Make Android signing secrets available as environment variables
+        # These are REQUIRED for Android builds
+        KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+      run: |
+        case ${{ matrix.target }} in
+          android)
+            echo "🤖 Building Android APK with release signing..."
+            
+            # Check if release signing secrets are configured in GitHub
+            if [ -z "$KEYSTORE_BASE64" ]; then
+              # CRITICAL: No signing secrets found - FAIL THE BUILD
+              echo "❌ ERROR: Release keystore not configured in GitHub Secrets"
+              echo ""
+              echo "Android builds REQUIRE release signing for production."
+              echo ""
+              echo "To enable release signing, add these secrets to your repository:"
+              echo "  Settings → Secrets and variables → Actions → New repository secret"
+              echo ""
+              echo "Required secrets:"
+              echo "  - KEYSTORE_BASE64 (base64-encoded keystore file)"
+              echo "  - KEYSTORE_PASSWORD (keystore password)"
+              echo "  - KEY_PASSWORD (key password)"
+              echo "  - KEY_ALIAS (key alias, e.g., ${{ github.event.repository.name }}-release)"
+              echo ""
+              echo "See workflow documentation for setup instructions."
+              echo ""
+              exit 1  # Fail the build if secrets are not configured
+            else
+              # Release signing secrets are available
+              echo "✅ Release keystore found in GitHub Secrets"
+              echo "Building signed APK for production distribution..."
+              
+              # Decode the base64-encoded keystore file
+              # Place it in android/app/ directory where Gradle expects it
+              echo "$KEYSTORE_BASE64" | base64 --decode > android/app/release-keystore.jks
+              
+              # Create key.properties file in android/ directory
+              # For Kotlin DSL build.gradle.kts: file() resolves from android/app/ directory
+              # So we use just the filename "release-keystore.jks"
+              cat > android/key.properties << EOF
+        storePassword=$KEYSTORE_PASSWORD
+        keyPassword=$KEY_PASSWORD
+        keyAlias=$KEY_ALIAS
+        storeFile=app/release-keystore.jks
+        EOF
+              
+              # Display the key.properties for debugging (without sensitive data)
+              echo ""
+              echo "📋 Signing configuration created:"
+              echo "  - Keystore location: android/app/release-keystore.jks"
+              echo "  - Key properties: android/key.properties"
+              # echo "  - Key alias: $KEY_ALIAS"
+              echo "  - Store file path: release-keystore.jks (resolves from android/app/)"
+              
+              # Verify keystore file exists before building
+              if [ -f "android/app/release-keystore.jks" ]; then
+                echo "  - ✅ Keystore file verified at correct location"
+              else
+                echo "  - ❌ ERROR: Keystore file not found!"
+                exit 1
+              fi
+              
+              # Build the release APK with signing
+              echo ""
+              flutter build apk --release
+              
+              # Verify the APK signature to ensure it was signed correctly
+              echo ""
+              echo "🔍 Verifying APK signature..."
+
+              # Check if APK is signed using apksigner (more reliable for modern APK signatures)
+              if apksigner verify --verbose build/app/outputs/flutter-apk/app-release.apk 2>&1 | grep -q "Verified using v1 scheme" || \
+                 apksigner verify --verbose build/app/outputs/flutter-apk/app-release.apk 2>&1 | grep -q "Verified using v2 scheme" || \
+                 apksigner verify --verbose build/app/outputs/flutter-apk/app-release.apk 2>&1 | grep -q "Verified using v3 scheme"; then
+                echo "✅ APK is properly signed with signature scheme v1, v2, or v3!"
+                
+                # Show signature details
+                echo ""
+                echo "📋 Signature Details:"
+                apksigner verify build/app/outputs/flutter-apk/app-release.apk
+              else
+                echo "❌ ERROR: APK is NOT signed!"
+                echo ""
+                echo "Debugging information:"
+                echo "Keystore file location:"
+                ls -lh android/app/*.jks || echo "No keystore files found in android/app/"
+                echo ""
+                echo "APK signature verification output:"
+                apksigner verify --verbose build/app/outputs/flutter-apk/app-release.apk
+                echo ""
+                exit 1
+              fi
+              
+              # Clean up sensitive files for security
+              # Never leave keystore files or passwords in the workspace
+              rm -f android/app/release-keystore.jks
+              rm -f android/key.properties
+              
+              echo ""
+              echo "✅ Signed APK created and verified successfully!"
+            fi
+            ;;
+          
+          linux)
+            # Build Linux application bundle
+            echo "🐧 Building Linux application..."
+            flutter build linux --release
+            echo "✅ Linux build completed successfully!"
+            ;;
+        esac
+
+    # -------------------------------------------------------------------------
+    # Step 7: Package build output for distribution
+    # -------------------------------------------------------------------------
+    # Compress builds into standard archive formats for each platform
+    # Makes downloads smaller and easier to distribute
+    - name: Package ${{ matrix.target }} build
+      shell: bash
+      run: |
+        # Create directory for packaged builds
+        mkdir -p build/packaged
+        
+        cd build
+        case ${{ matrix.target }} in
+          android)
+            # Android APK is already compressed, just rename it
+            echo "📦 Packaging Android APK..."
+            cp app/outputs/flutter-apk/app-release.apk packaged/${{ github.event.repository.name }}-${{ matrix.artifact_suffix }}.apk
+            
+            # Display APK file size
+            APK_SIZE=$(du -h packaged/${{ github.event.repository.name }}-${{ matrix.artifact_suffix }}.apk | cut -f1)
+            echo "📊 APK Size: $APK_SIZE"
+            ;;
+          
+          linux)
+            # Create tar.gz archive for Linux (standard format on Linux)
+            echo "📦 Creating Linux tar.gz archive..."
+            cd linux/x64/release
+            tar -czf ../../../packaged/${{ github.event.repository.name }}-${{ matrix.artifact_suffix }}.tar.gz bundle/
+            
+            # Display archive file size
+            cd ../../..
+            ARCHIVE_SIZE=$(du -h packaged/${{ github.event.repository.name }}-${{ matrix.artifact_suffix }}.tar.gz | cut -f1)
+            echo "📊 Archive Size: $ARCHIVE_SIZE"
+            ;;
+        esac
+        
+        echo "✅ Packaging complete!"
+
+    # -------------------------------------------------------------------------
+    # Step 8: Upload packaged build as workflow artifact
+    # -------------------------------------------------------------------------
+    # This makes builds available in the GitHub Actions UI for download
+    # Also used by the release job to attach files to the GitHub release
+    - name: Upload build artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ github.event.repository.name }}-${{ matrix.artifact_suffix }}
+        path: build/packaged/*
+        retention-days: 30  # Artifacts auto-delete after 30 days to save storage
+        if-no-files-found: error  # Fail workflow if build didn't produce output
+
+  # ============================================================================
+  # JOB 3: Create GitHub Release with all builds
+  # ============================================================================
+  # IMPORTANT: This job ONLY runs if BOTH [BUILD] and [PUBLISH] are in commit message
+  # AND only from main branch (safety measure to prevent accidental releases from feature branches)
+  create-release:
+    name: Create GitHub Release
+    needs: [check-trigger, build]
+    # Only run if BOTH build trigger AND publish trigger are true AND on main branch
+    if: needs.check-trigger.outputs.should_build == 'true' && needs.check-trigger.outputs.should_publish == 'true' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    
+    steps:
+    # -------------------------------------------------------------------------
+    # Step 1: Validate version tag before proceeding
+    # -------------------------------------------------------------------------
+    # Ensures the version tag is properly formatted before creating a release
+    - name: Validate version tag
+      run: |
+        VERSION="${{ needs.check-trigger.outputs.version }}"
+        
+        if [[ "$VERSION" == "none" ]] || [[ -z "$VERSION" ]]; then
+          echo "ERROR: Invalid version tag: $VERSION"
+          echo "The version was not properly determined in the check-trigger job"
+          exit 1
+        fi
+        
+        # Basic validation - version should start with 'v' followed by numbers/dots
+        if [[ ! "$VERSION" =~ ^v[0-9]+\. ]]; then
+          echo "WARNING: Version tag doesn't follow standard semantic versioning: $VERSION"
+          echo "This might cause issues with the release process"
+        fi
+        
+        echo "Validated version tag: $VERSION"
+
+    # -------------------------------------------------------------------------
+    # Step 2: Download all build artifacts from build job
+    # -------------------------------------------------------------------------
+    # Retrieves all platform builds (Linux and Android)
+    # Downloads to local artifacts/ directory
+    - name: Download all build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts/  # Download all artifacts to this directory
+
+    # -------------------------------------------------------------------------
+    # Step 3: Display artifact structure for debugging
+    # -------------------------------------------------------------------------
+    # Helps verify all builds were downloaded correctly
+    - name: Display downloaded artifacts
+      run: |
+        echo "📦 Downloaded artifacts:"
+        ls -R artifacts/
+        echo ""
+        echo "📊 File sizes:"
+        du -h artifacts/*/*
+
+    # -------------------------------------------------------------------------
+    # Step 4: Create draft GitHub release with all executables
+    # -------------------------------------------------------------------------
+    # Creates a draft release (not published) so you can review before publishing
+    # Automatically generates release notes from commits since last release
+    - name: Create Draft Release
+      uses: softprops/action-gh-release@v2
+      with:
+        # Use version number determined in check-trigger job
+        tag_name: ${{ needs.check-trigger.outputs.version }}
+        name: ${{ github.event.repository.name }} ${{ needs.check-trigger.outputs.version }}
+        
+        # Create as draft - allows you to review and edit before publishing
+        draft: true
+        
+        # Auto-generate release notes from commit messages since last release
+        generate_release_notes: true
+        
+        # Upload all platform builds to the release (Linux and Android only)
+        files: |
+          artifacts/${{ github.event.repository.name }}-Android/*.apk
+          artifacts/${{ github.event.repository.name }}-Linux/*.tar.gz
+        
+        # Release description with download instructions
+        body: |
+          ## 🚀 ${{ github.event.repository.name }} Release
+          
+          ### 📥 Download Instructions
+          
+          Choose the version for your platform:
+          
+          #### 🤖 Android
+          - **Download**: `${{ github.event.repository.name }}-Android.apk`
+          - **Install**: 
+            1. Download the APK file
+            2. Enable "Install from Unknown Sources" in device settings:
+               - Settings → Security → Unknown Sources (Android 7 and below)
+               - Settings → Apps → Special app access → Install unknown apps (Android 8+)
+            3. Open the APK file and tap "Install"
+          - **Note**: Security warning is normal for sideloaded apps
+          - **Signing**: This APK is signed with a production release key
+          
+          #### 🐧 Linux
+          - **Download**: `${{ github.event.repository.name }}-Linux.tar.gz`
+          - **Install**:
+            ```bash
+            # Extract the archive
+            tar -xzf ${{ github.event.repository.name }}-Linux.tar.gz
+            
+            # Navigate to the bundle directory
+            cd bundle
+            
+            # Make the executable runnable (if needed)
+            chmod +x ${{ github.event.repository.name }}
+            
+            # Run the application
+            ./${{ github.event.repository.name }}
+            ```
+          - **Requirements**: GTK3 libraries (usually pre-installed on modern Linux distributions)
+          
+          ### 🔐 Security & Signing Information
+          
+          - **Android APK**: Signed with production release keystore
+          - **Verification**: You can verify the APK signature using:
+            ```bash
+            jarsigner -verify -verbose -certs ${{ github.event.repository.name }}-Android.apk
+            ```
+          
+          ### ⚠️ Installation Notes
+          
+          #### Android:
+          - First-time installation requires enabling "Unknown Sources"
+          - Google Play Protect may show a warning - this is expected for apps not from Play Store
+          - The app has all necessary permissions to function properly
+          
+          #### Linux:
+          - Ensure you have GTK3 libraries installed:
+            ```bash
+            # Ubuntu/Debian
+            sudo apt-get install libgtk-3-0
+            
+            # Fedora
+            sudo dnf install gtk3
+            
+            # Arch Linux
+            sudo pacman -S gtk3
+            ```
+          - If you encounter permission issues, make sure the executable has execute permissions
+          
+          ### 📝 What's New
+          
+          See automatically generated release notes below for all changes since the last release.
+          
+          ---
+          
+          **Full Changelog**: https://github.com/${{ github.repository }}/compare/${{ github.event.before }}...${{ github.sha }}
+          
+          **Build Information**:
+          - Build Commit: `${{ github.sha }}`
+          - Build Date: ${{ github.event.head_commit.timestamp }}
+          - Platforms: Android (ARM), Linux (x64)
+      
+      env:
+        # GitHub automatically provides this token for releases
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    # -------------------------------------------------------------------------
+    # Step 5: Workflow completion message
+    # -------------------------------------------------------------------------
+    - name: Release created successfully
+      run: |
+        echo "================================"
+        echo "✅ DRAFT RELEASE CREATED!"
+        echo "================================"
+        echo ""
+        echo "📦 Version: ${{ needs.check-trigger.outputs.version }}"
+        echo "🔗 View at: https://github.com/${{ github.repository }}/releases"
+        echo ""
+        echo "📝 Next Steps:"
+        echo "  1. Go to the Releases page"
+        echo "  2. Review the draft release"
+        echo "  3. Test the downloads"
+        echo "  4. Edit description if needed"
+        echo "  5. Click 'Publish release' when ready"
+        echo ""
+        echo "🎉 Your builds are ready for distribution!"
+        echo "================================"

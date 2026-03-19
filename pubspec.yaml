@@ -1,0 +1,48 @@
+name: folio
+description: A distraction-free EPUB ebook reader for Android and Linux.
+publish_to: none
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.4.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # ── EPUB rendering ──────────────────────────────────────────────────────────
+  # Pure Flutter widgets (no WebView), works on Android AND Linux
+  epub_view: ^3.2.0
+
+  # Low-level epub parser used for metadata extraction (cover, title, author)
+  # epub_view already depends on this; we declare it explicitly so we can use it
+  epubx: ^4.0.0
+
+  # ── File / folder picking ───────────────────────────────────────────────────
+  # Supports Android (SAF) and Linux (GTK file chooser / XDG portal)
+  file_picker: ^10.3.10
+
+  # ── State management ────────────────────────────────────────────────────────
+  flutter_riverpod: ^3.3.1
+
+  # ── Persistence ─────────────────────────────────────────────────────────────
+  shared_preferences: ^2.3.5
+
+  # ── Fonts ───────────────────────────────────────────────────────────────────
+  google_fonts: ^8.0.2
+
+  # ── Path utilities ──────────────────────────────────────────────────────────
+  path: ^1.9.1
+  path_provider: ^2.1.5
+
+  # ── Android runtime permissions ─────────────────────────────────────────────
+  # Handles READ_EXTERNAL_STORAGE (Android < 13) and media permissions (≥ 13)
+  permission_handler: ^12.0.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

@@ -1,0 +1,76 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- ── Storage permissions ──────────────────────────────────────────────
+         Android ≤ 12  → READ_EXTERNAL_STORAGE covers /sdcard and removable media.
+         Android 13+   → READ_MEDIA_IMAGES / READ_MEDIA_VIDEO are scoped; for
+                         arbitrary file access (epub files anywhere) we still
+                         need MANAGE_EXTERNAL_STORAGE or use SAF (file_picker
+                         already uses SAF on 13+, so the permission is only a
+                         fallback for older devices).
+    ─────────────────────────────────────────────────────────────────────── -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
+
+    <!-- Keep screen on (optional, controlled by settings) -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- Internet is needed only by google_fonts to download fonts on first run.
+         Once cached they work offline. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <application
+        android:label="Folio"
+        android:name="${applicationName}"
+        android:icon="@mipmap/ic_launcher"
+        android:requestLegacyExternalStorage="true"
+        android:allowBackup="true"
+        android:fullBackupContent="@xml/backup_rules"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:theme="@style/LaunchTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize">
+
+            <!-- Opt in to edge-to-edge rendering (needed for immersive reader) -->
+            <meta-data
+                android:name="io.flutter.embedding.android.NormalTheme"
+                android:resource="@style/NormalTheme" />
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!-- Allow opening .epub files from other apps (Files, e-mail, etc.) -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/epub+zip" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:pathPattern=".*\\.epub" />
+            </intent-filter>
+        </activity>
+
+        <!-- Required by flutter_local_notifications / keep-screen-on -->
+        <meta-data
+            android:name="flutterEmbedding"
+            android:value="2" />
+
+    </application>
+
+    <!-- Required by tools:ignore attribute above -->
+    <uses-sdk tools:overrideLibrary="io.flutter.plugins.permissionhandler" />
+
+</manifest>

@@ -1,0 +1,39 @@
+# analysis_options.yaml
+#
+# Dart static analysis configuration for Folio.
+# Uses flutter_lints as a base and adds a few extra opinionated rules.
+
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  # Treat the generated file folder as excluded so lint errors in
+  # auto-generated code don't pollute the output.
+  exclude:
+    - "**/*.g.dart"
+    - "**/*.freezed.dart"
+    - "build/**"
+
+  errors:
+    # Treat these as warnings so CI can catch them without blocking builds.
+    todo: warning
+    fixme: warning
+
+linter:
+  rules:
+    # ── Style ──────────────────────────────────────────────────────────────
+    always_declare_return_types: true
+    avoid_print: true               # Use a logger instead of print() in prod.
+    prefer_const_constructors: true
+    prefer_const_declarations: true
+    prefer_final_fields: true
+    prefer_final_locals: true
+    use_super_parameters: true
+
+    # ── Safety ────────────────────────────────────────────────────────────
+    avoid_dynamic_calls: true
+    cancel_subscriptions: true
+    close_sinks: true
+
+    # ── Flutter-specific ──────────────────────────────────────────────────
+    use_key_in_widget_constructors: true
+    sized_box_for_whitespace: true
