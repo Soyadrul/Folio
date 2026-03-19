@@ -40,14 +40,14 @@ jobs:
       should_build: ${{ steps.check.outputs.should_build }}
       should_publish: ${{ steps.check.outputs.should_publish }}
       version: ${{ steps.version.outputs.version }}
-    
+
     steps:
     # Checkout repository to access commit history
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         fetch-depth: 0  # Fetch full history to read commit messages
-    
+
     # Check if the commit message contains [BUILD] and/or [PUBLISH] trigger keywords
     - name: Check for [BUILD] and [PUBLISH] triggers
       id: check
@@ -147,11 +147,11 @@ jobs:
     # Only run this job if [BUILD] trigger was detected
     if: needs.check-trigger.outputs.should_build == 'true'
     runs-on: ${{ matrix.os }}
-    
+
     strategy:
       # Don't cancel other platform builds if one fails
       fail-fast: false
-      
+
       # Build matrix defining target platforms (Linux and Android only)
       matrix:
         include:
@@ -160,19 +160,19 @@ jobs:
             target: linux
             artifact_suffix: Linux
             artifact_path: build/linux/x64/release/bundle/
-          
+
           # Android Application (APK) - with release signing
           - os: ubuntu-latest
             target: android
             artifact_suffix: Android
             artifact_path: build/app/outputs/flutter-apk/app-release.apk
-    
+
     steps:
     # -------------------------------------------------------------------------
     # Step 1: Checkout repository code
     # -------------------------------------------------------------------------
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     # -------------------------------------------------------------------------
     # Step 2: Set up Java for Android builds
@@ -182,7 +182,7 @@ jobs:
     # Only runs for Android target to save time on other platforms
     - name: Set up Java (Android only)
       if: matrix.target == 'android'
-      uses: actions/setup-java@v4
+      uses: actions/setup-java@v5
       with:
         java-version: '21'  # Android project requires Java 21
         distribution: 'temurin'  # Eclipse Temurin is stable and well-supported
@@ -446,7 +446,7 @@ jobs:
     # This makes builds available in the GitHub Actions UI for download
     # Also used by the release job to attach files to the GitHub release
     - name: Upload build artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       with:
         name: ${{ github.event.repository.name }}-${{ matrix.artifact_suffix }}
         path: build/packaged/*
@@ -464,7 +464,7 @@ jobs:
     # Only run if BOTH build trigger AND publish trigger are true AND on main branch
     if: needs.check-trigger.outputs.should_build == 'true' && needs.check-trigger.outputs.should_publish == 'true' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    
+
     steps:
     # -------------------------------------------------------------------------
     # Step 1: Validate version tag before proceeding
@@ -494,7 +494,7 @@ jobs:
     # Retrieves all platform builds (Linux and Android)
     # Downloads to local artifacts/ directory
     - name: Download all build artifacts
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v7
       with:
         path: artifacts/  # Download all artifacts to this directory
 
@@ -521,13 +521,13 @@ jobs:
         # Use version number determined in check-trigger job
         tag_name: ${{ needs.check-trigger.outputs.version }}
         name: ${{ github.event.repository.name }} ${{ needs.check-trigger.outputs.version }}
-        
+
         # Create as draft - allows you to review and edit before publishing
         draft: true
-        
+
         # Auto-generate release notes from commit messages since last release
         generate_release_notes: true
-        
+
         # Upload all platform builds to the release (Linux and Android only)
         files: |
           artifacts/${{ github.event.repository.name }}-Android/*.apk
