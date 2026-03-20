@@ -33,8 +33,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   Future<void> _loadSettings() async {
-    final saved = await loadSettings();
-    ref.read(settingsNotifierProvider.notifier).update((_) => saved);
+    try {
+      final saved = await loadSettings();
+      if (mounted) {
+        ref.read(settingsNotifierProvider.notifier).update((_) => saved);
+      }
+    } catch (e) {
+      // Ignore errors loading settings - app will use defaults
+      debugPrint('Error loading settings: $e');
+    }
   }
 
   @override

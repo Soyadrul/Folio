@@ -22,11 +22,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'screens/home_screen.dart';
 import 'utils/theme_utils.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // Lock to portrait on Android (optional – remove to allow landscape).
-  SystemChrome.setPreferredOrientations([
+  await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
     DeviceOrientation.landscapeLeft,
