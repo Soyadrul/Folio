@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <!-- Backup all shared preferences and files by default -->
+    <include domain="sharedpref" path="." />
+    <include domain="file" path="." />
+    
+    <!-- Exclude sensitive data if needed in the future -->
+    <!-- <exclude domain="sharedpref" path="sensitive_data.xml" /> -->
+</full-backup-content>

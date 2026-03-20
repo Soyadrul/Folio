@@ -27,10 +27,10 @@
         android:icon="@mipmap/ic_launcher"
         android:requestLegacyExternalStorage="true"
         android:allowBackup="true"
-        android:supportsRtl="true">
-        <!-- android:roundIcon="@mipmap/ic_launcher_round"
         android:fullBackupContent="@xml/backup_rules"
         android:dataExtractionRules="@xml/data_extraction_rules"
+        android:supportsRtl="true">
+        <!-- android:roundIcon="@mipmap/ic_launcher_round"
         -->
 
         <activity
