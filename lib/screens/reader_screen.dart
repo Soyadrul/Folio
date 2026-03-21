@@ -1,8 +1,9 @@
 import 'dart:io';
 
-import 'package:epub_view/epub_view.dart';
+import 'package:epub_view/epub_view.dart' hide Image;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_html/flutter_html.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -181,6 +182,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
       settings: settings,
       systemBrightness: brightness,
     );
+    final textColor = readerTextColor(settings.readingMode, brightness);
 
     return EpubView(
       controller: _epubController,
@@ -193,12 +195,66 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
       builders: EpubViewBuilders<DefaultBuilderOptions>(
         options: DefaultBuilderOptions(
           textStyle: textStyle,
+          paragraphPadding: EdgeInsets.zero,
         ),
         chapterDividerBuilder: (_) => Divider(
           height: 48,
-          color: readerTextColor(settings.readingMode, brightness)
-              .withValues(alpha: 0.15),
+          color: textColor.withValues(alpha: 0.15),
         ),
+        chapterBuilder: (
+          context,
+          builders,
+          document,
+          chapters,
+          paragraphs,
+          index,
+          chapterIndex,
+          paragraphIndex,
+          onExternalLinkPressed,
+        ) {
+          if (paragraphs.isEmpty) {
+            return Container();
+          }
+
+          final options = builders.options as DefaultBuilderOptions;
+
+          return Column(
+            children: <Widget>[
+              if (chapterIndex >= 0 && paragraphIndex == 0)
+                builders.chapterDividerBuilder(chapters[chapterIndex]),
+              Html(
+                data: paragraphs[index].element.outerHtml,
+                onLinkTap: (href, _, __) =>
+                    onExternalLinkPressed(href!),
+                style: {
+                  'html': Style(
+                    padding: HtmlPaddings.only(
+                      top: (options.paragraphPadding as EdgeInsets?)?.top,
+                      right: (options.paragraphPadding as EdgeInsets?)?.right,
+                      bottom:
+                          (options.paragraphPadding as EdgeInsets?)?.bottom,
+                      left: (options.paragraphPadding as EdgeInsets?)?.left,
+                    ),
+                    textAlign: settings.textAlign,
+                  ).merge(Style.fromTextStyle(options.textStyle)),
+                },
+                extensions: [
+                  TagExtension(
+                    tagsToExtend: {"img"},
+                    builder: (imageContext) {
+                      final url = imageContext.attributes['src']!
+                          .replaceAll('../', '');
+                      final content = document.Content!.Images![url]!.Content!;
+                      return Image(
+                        image: MemoryImage(Uint8List.fromList(content)),
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ],
+          );
+        },
       ),
     );
   }

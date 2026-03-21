@@ -202,6 +202,7 @@ class SettingsScreen extends ConsumerWidget {
             'it was the epoch of belief, it was the epoch of incredulity.',
             style: bodyStyle,
             textAlign: settings.textAlign,
+            textWidthBasis: TextWidthBasis.parent,
           ),
         ],
       ),

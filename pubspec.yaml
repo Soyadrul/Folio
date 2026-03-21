@@ -14,6 +14,9 @@ dependencies:
   # Pure Flutter widgets (no WebView), works on Android AND Linux
   epub_view: ^3.2.0
 
+  # HTML rendering for EPUB content (used by epub_view, we use it directly for custom styling)
+  flutter_html: ^3.0.0
+
   # Low-level epub parser used for metadata extraction (cover, title, author)
   # epub_view already depends on this; we declare it explicitly so we can use it
   epubx: ^4.0.0
