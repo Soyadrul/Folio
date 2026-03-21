@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/material.dart';
 
 /// The four display modes available in the reader.
 enum ReadingMode { auto, light, dark, sepia }
@@ -17,6 +18,12 @@ class AppSettings {
 
   /// Line height multiplier (1.0 = tight, 2.0 = very airy).
   final double lineHeight;
+
+  /// Text alignment for the book body text.
+  final TextAlign textAlign;
+
+  /// Whether hyphenation is enabled for the book text.
+  final bool hyphenation;
 
   // ── Layout ────────────────────────────────────────────────────────────────
 
@@ -40,6 +47,8 @@ class AppSettings {
     this.fontSize = 18.0,
     this.fontFamily = 'Merriweather',
     this.lineHeight = 1.65,
+    this.textAlign = TextAlign.justify,
+    this.hyphenation = true,
     this.marginHorizontal = 20.0,
     this.readingMode = ReadingMode.auto,
     this.keepScreenOn = true,
@@ -50,6 +59,8 @@ class AppSettings {
     double? fontSize,
     String? fontFamily,
     double? lineHeight,
+    TextAlign? textAlign,
+    bool? hyphenation,
     double? marginHorizontal,
     ReadingMode? readingMode,
     bool? keepScreenOn,
@@ -59,6 +70,8 @@ class AppSettings {
       fontSize: fontSize ?? this.fontSize,
       fontFamily: fontFamily ?? this.fontFamily,
       lineHeight: lineHeight ?? this.lineHeight,
+      textAlign: textAlign ?? this.textAlign,
+      hyphenation: hyphenation ?? this.hyphenation,
       marginHorizontal: marginHorizontal ?? this.marginHorizontal,
       readingMode: readingMode ?? this.readingMode,
       keepScreenOn: keepScreenOn ?? this.keepScreenOn,
@@ -72,6 +85,8 @@ class AppSettings {
         'fontSize': fontSize,
         'fontFamily': fontFamily,
         'lineHeight': lineHeight,
+        'textAlign': textAlign.index,
+        'hyphenation': hyphenation,
         'marginHorizontal': marginHorizontal,
         'readingMode': readingMode.index,
         'keepScreenOn': keepScreenOn,
@@ -82,6 +97,9 @@ class AppSettings {
         fontSize: (json['fontSize'] as num?)?.toDouble() ?? 18.0,
         fontFamily: json['fontFamily'] as String? ?? 'Merriweather',
         lineHeight: (json['lineHeight'] as num?)?.toDouble() ?? 1.65,
+        textAlign: TextAlign
+            .values[json['textAlign'] as int? ?? TextAlign.justify.index],
+        hyphenation: json['hyphenation'] as bool? ?? true,
         marginHorizontal:
             (json['marginHorizontal'] as num?)?.toDouble() ?? 20.0,
         readingMode: ReadingMode

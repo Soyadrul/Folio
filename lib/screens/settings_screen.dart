@@ -53,6 +53,19 @@ class SettingsScreen extends ConsumerWidget {
             title: 'Typography',
             children: [
               _buildFontFamilyTile(context, settings, notifier),
+              _buildTextAlignmentSelector(context, settings, notifier),
+              SwitchListTile(
+                title: Text('Hyphenation', style: _tileTextStyle(context)),
+                subtitle: Text(
+                  'Enable automatic hyphenation for justified text.',
+                  style: _subtitleStyle(context),
+                ),
+                value: settings.hyphenation,
+                activeThumbColor: kAccentColor,
+                onChanged: settings.textAlign == TextAlign.justify
+                    ? (v) => notifier.update((s) => s.copyWith(hyphenation: v))
+                    : null,
+              ),
               _buildSliderTile(
                 context,
                 label: 'Font Size',
@@ -188,6 +201,7 @@ class SettingsScreen extends ConsumerWidget {
             'it was the age of wisdom, it was the age of foolishness, '
             'it was the epoch of belief, it was the epoch of incredulity.',
             style: bodyStyle,
+            textAlign: settings.textAlign,
           ),
         ],
       ),
@@ -264,6 +278,42 @@ class SettingsScreen extends ConsumerWidget {
               )
               .toList(),
         ),
+      ),
+    );
+  }
+
+  // ── Text alignment selector ───────────────────────────────────────────────
+
+  Widget _buildTextAlignmentSelector(
+    BuildContext context,
+    AppSettings settings,
+    SettingsNotifier notifier,
+  ) {
+    const alignments = [
+      (TextAlign.left, 'Left', Icons.format_align_left_rounded),
+      (TextAlign.justify, 'Justify', Icons.format_align_justify_rounded),
+      (TextAlign.right, 'Right', Icons.format_align_right_rounded),
+    ];
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+      child: Row(
+        children: alignments.map((entry) {
+          final (align, label, icon) = entry;
+          final isSelected = settings.textAlign == align;
+          return Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: _AlignmentChip(
+                icon: icon,
+                label: label,
+                selected: isSelected,
+                onTap: () =>
+                    notifier.update((s) => s.copyWith(textAlign: align)),
+              ),
+            ),
+          );
+        }).toList(),
       ),
     );
   }
@@ -372,6 +422,73 @@ class _ModeChip extends StatelessWidget {
   final VoidCallback onTap;
 
   const _ModeChip({
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          color: selected
+              ? kAccentColor.withValues(alpha: 0.15)
+              : Theme.of(context).cardTheme.color,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: selected ? kAccentColor : Colors.transparent,
+            width: 1.5,
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 22,
+              color: selected
+                  ? kAccentColor
+                  : Theme.of(context)
+                      .textTheme
+                      .bodyMedium
+                      ?.color,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: GoogleFonts.lato(
+                fontSize: 11,
+                fontWeight:
+                    selected ? FontWeight.w700 : FontWeight.w500,
+                color: selected
+                    ? kAccentColor
+                    : Theme.of(context)
+                        .textTheme
+                        .bodyMedium
+                        ?.color,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Alignment chip widget ───────────────────────────────────────────────────
+
+class _AlignmentChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _AlignmentChip({
     required this.icon,
     required this.label,
     required this.selected,
