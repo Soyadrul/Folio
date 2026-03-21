@@ -110,7 +110,7 @@ class SettingsScreen extends ConsumerWidget {
                   style: _subtitleStyle(context),
                 ),
                 value: settings.keepScreenOn,
-                activeColor: kAccentColor,
+                activeThumbColor: kAccentColor,
                 onChanged: (v) =>
                     notifier.update((s) => s.copyWith(keepScreenOn: v)),
               ),
@@ -122,7 +122,7 @@ class SettingsScreen extends ConsumerWidget {
                   style: _subtitleStyle(context),
                 ),
                 value: settings.showProgressBar,
-                activeColor: kAccentColor,
+                activeThumbColor: kAccentColor,
                 onChanged: (v) =>
                     notifier.update((s) => s.copyWith(showProgressBar: v)),
               ),

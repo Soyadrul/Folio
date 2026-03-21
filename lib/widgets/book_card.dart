@@ -59,7 +59,7 @@ class BookCard extends StatelessWidget {
                 value: book.lastProgress,
                 minHeight: 3,
                 backgroundColor: scheme.onSurface.withValues(alpha: 0.08),
-                valueColor: AlwaysStoppedAnimation(kAccentColor),
+                valueColor: const AlwaysStoppedAnimation<Color>(kAccentColor),
               ),
 
             // ── Metadata ─────────────────────────────────────────────────

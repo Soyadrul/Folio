@@ -108,10 +108,10 @@ ThemeData buildLightTheme() {
         color: const Color(0xFFF2EFE8),
       ),
     ),
-    cardTheme: CardThemeData(
-      color: const Color(0xFFFAF8F4),
+    cardTheme: const CardThemeData(
+      color: Color(0xFFFAF8F4),
       elevation: 2,
-      shadowColor: const Color(0x22000000),
+      shadowColor: Color(0x22000000),
     ),
     textTheme: GoogleFonts.latoTextTheme().copyWith(
       headlineLarge: GoogleFonts.playfairDisplay(
@@ -155,10 +155,10 @@ ThemeData buildDarkTheme() {
         color: const Color(0xFFE2DDD5),
       ),
     ),
-    cardTheme: CardThemeData(
-      color: const Color(0xFF1C1C28),
+    cardTheme: const CardThemeData(
+      color: Color(0xFF1C1C28),
       elevation: 2,
-      shadowColor: const Color(0x44000000),
+      shadowColor: Color(0x44000000),
     ),
     textTheme: GoogleFonts.latoTextTheme(ThemeData.dark().textTheme).copyWith(
       headlineLarge: GoogleFonts.playfairDisplay(

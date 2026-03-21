@@ -97,11 +97,12 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   void _onValueChanged(dynamic value) {
     if (value == null) return;
     // Extract progress and chapter from the value object
-    final progress = (value as dynamic).progress ?? 0.0;
-    final chapterIndex = (value as dynamic).chapterNumber ?? 0;
+    final map = value as Map;
+    final progress = map['progress'] as num? ?? 0.0;
+    final chapterIndex = map['chapterNumber'] as int? ?? 0;
 
     setState(() {
-      _progress = progress.clamp(0.0, 1.0);
+      _progress = progress.toDouble().clamp(0.0, 1.0);
       _currentChapter = chapterIndex;
     });
 
@@ -293,7 +294,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                   backgroundColor:
                       textColor.withValues(alpha: 0.15),
                   valueColor:
-                      AlwaysStoppedAnimation(kAccentColor),
+                      const AlwaysStoppedAnimation<Color>(kAccentColor),
                 ),
               ),
               const SizedBox(height: 6),
