@@ -18,7 +18,7 @@ if (keystorePropertiesFile.exists()) {
 
 
 android {
-    namespace = "com.github.Soyadrul.folio"
+    namespace = "com.github.Soyadrul.Folio"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -34,7 +34,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.github.Soyadrul.folio"
+        applicationId = "com.github.Soyadrul.Folio"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion

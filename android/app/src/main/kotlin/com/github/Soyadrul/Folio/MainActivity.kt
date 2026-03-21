@@ -1,4 +1,4 @@
-package com.github.Soyadrul.folio
+package com.github.Soyadrul.Folio
 
 import io.flutter.embedding.android.FlutterActivity
 
