@@ -207,8 +207,12 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
       systemBrightness: brightness,
     );
     final textColor = readerTextColor(settings.readingMode, brightness);
+    
+    final shouldHyphenate =
+      settings.hyphenation && settings.textAlign == TextAlign.justify;
 
     return EpubView(
+      key: ValueKey(settings.toJsonString()),
       controller: _epubController,
       onDocumentLoaded: (document) {
         setState(() {
@@ -236,54 +240,93 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
           paragraphIndex,
           onExternalLinkPressed,
         ) {
-          if (paragraphs.isEmpty) {
-            return Container();
-          }
+          if (paragraphs.isEmpty) return Container();
 
           final options = builders.options as DefaultBuilderOptions;
+          final element = paragraphs[index].element;
 
-          // Apply hyphenation to HTML content if enabled and text is justified.
-          final htmlContent = paragraphs[index].element.outerHtml;
-          final shouldHyphenate =
-              settings.hyphenation && settings.textAlign == TextAlign.justify;
-          final processedHtml = shouldHyphenate
-              ? hyphenateHtmlContentSync(htmlContent, settings.hyphenationLanguage)
-              : htmlContent;
+          // epub_view gives us a <section> container. Walk its children so we
+          // can hyphenate each <p>, <h1>, etc. individually.
+          const textTags = {
+            'p', 'div', 'li', 'blockquote',
+            'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+          };
+
+          final paraStyle = readerBodyTextStyle(
+            settings: settings,
+            systemBrightness: brightness,
+          );
+          final edgePadding = options.paragraphPadding is EdgeInsets
+              ? options.paragraphPadding as EdgeInsets
+              : EdgeInsets.zero;
+
+          // Build one widget per child element inside the section.
+          final children = element.children.map<Widget>((child) {
+            final tag = child.localName?.toLowerCase() ?? '';
+            final text = child.text.trim();
+
+            if (shouldHyphenate && textTags.contains(tag) && text.isNotEmpty) {
+              return HyphenatedParagraph(
+                text: text,
+                style: paraStyle,
+                textAlign: settings.textAlign,
+                languageCode: settings.hyphenationLanguage,
+                padding: edgePadding,
+              );
+            }
+
+            // Non-text child or hyphenation off → flutter_html as before.
+            return Html(
+              data: child.outerHtml,
+              onLinkTap: (href, _, __) => onExternalLinkPressed(href!),
+              style: {
+                'html': Style(
+                  padding: HtmlPaddings.only(
+                    top: edgePadding.top,
+                    right: edgePadding.right,
+                    bottom: edgePadding.bottom,
+                    left: edgePadding.left,
+                  ),
+                  textAlign: settings.textAlign,
+                ).merge(Style.fromTextStyle(options.textStyle)),
+              },
+              extensions: [
+                TagExtension(
+                  tagsToExtend: {'img'},
+                  builder: (imageContext) {
+                    final url =
+                        imageContext.attributes['src']!.replaceAll('../', '');
+                    final content =
+                        document.Content!.Images![url]!.Content!;
+                    return Image(
+                      image: MemoryImage(Uint8List.fromList(content)),
+                    );
+                  },
+                ),
+              ],
+            );
+          }).toList();
+
+          // If the section had no children at all, fall back to rendering the
+          // whole element via flutter_html (handles edge-case EPUBs).
+          if (children.isEmpty) {
+            return Html(
+              data: element.outerHtml,
+              onLinkTap: (href, _, __) => onExternalLinkPressed(href!),
+              style: {
+                'html': Style(
+                  textAlign: settings.textAlign,
+                ).merge(Style.fromTextStyle(options.textStyle)),
+              },
+            );
+          }
 
           return Column(
-            children: <Widget>[
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
               if (chapterIndex >= 0 && paragraphIndex == 0)
                 builders.chapterDividerBuilder(chapters[chapterIndex]),
-              Html(
-                data: processedHtml,
-                onLinkTap: (href, _, __) =>
-                    onExternalLinkPressed(href!),
-                style: {
-                  'html': Style(
-                    padding: HtmlPaddings.only(
-                      top: (options.paragraphPadding as EdgeInsets?)?.top,
-                      right: (options.paragraphPadding as EdgeInsets?)?.right,
-                      bottom:
-                          (options.paragraphPadding as EdgeInsets?)?.bottom,
-                      left: (options.paragraphPadding as EdgeInsets?)?.left,
-                    ),
-                    textAlign: settings.textAlign,
-                  ).merge(Style.fromTextStyle(options.textStyle)),
-                },
-                extensions: [
-                  TagExtension(
-                    tagsToExtend: {"img"},
-                    builder: (imageContext) {
-                      final url = imageContext.attributes['src']!
-                          .replaceAll('../', '');
-                      final content = document.Content!.Images![url]!.Content!;
-                      return Image(
-                        image: MemoryImage(Uint8List.fromList(content)),
-                      );
-                    },
-                  ),
-                ],
-              ),
+              ...children,
             ],
           );
         },

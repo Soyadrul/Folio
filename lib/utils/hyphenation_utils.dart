@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:hyphenatorx/hyphenatorx.dart';
 import 'package:hyphenatorx/languages/language_de_1996.dart';
 import 'package:hyphenatorx/languages/language_en_us.dart';
@@ -6,114 +7,173 @@ import 'package:hyphenatorx/languages/language_fr.dart';
 import 'package:hyphenatorx/languages/language_it.dart';
 import 'package:hyphenatorx/languages/language_pt.dart';
 
-/// Cache for hyphenator instances by language code.
+// ── Hyphenator cache ───────────────────────────────────────────────────────
+
 final Map<String, Hyphenator> _hyphenators = {};
 
-/// Returns a cached [Hyphenator] instance for the given language code.
-///
-/// Uses regular hyphen character (-) for syllable marks.
-/// Note: Flutter's text rendering engine doesn't properly display soft hyphens
-/// (U+00AD) at line breaks, so we use regular hyphens which are always visible.
-/// This matches traditional print typography where hyphenation marks are shown.
-///
-/// Supported language codes: en_us, it, de_1996, fr, es, pt
+/// Returns a cached [Hyphenator] for [languageCode].
+/// Uses U+00AD (soft hyphen) purely as an internal syllable-break marker;
+/// it is never passed to Flutter's text engine directly.
 Hyphenator getHyphenator([String languageCode = 'en_us']) {
-  if (_hyphenators.containsKey(languageCode)) {
-    return _hyphenators[languageCode]!;
+  return _hyphenators.putIfAbsent(languageCode, () {
+    return switch (languageCode.toLowerCase()) {
+      'it'               => Hyphenator(Language_it(),       symbol: '\u00AD'),
+      'de_1996' || 'de'  => Hyphenator(Language_de_1996(),  symbol: '\u00AD'),
+      'fr'               => Hyphenator(Language_fr(),        symbol: '\u00AD'),
+      'es'               => Hyphenator(Language_es(),        symbol: '\u00AD'),
+      'pt'               => Hyphenator(Language_pt(),        symbol: '\u00AD'),
+      _                  => Hyphenator(Language_en_us(),     symbol: '\u00AD'),
+    };
+  });
+}
+
+// ── TextPainter measurement helper ─────────────────────────────────────────
+
+/// Measures the rendered width of [text] in a single line using [style].
+double _measureWidth(String text, TextStyle style) {
+  final painter = TextPainter(
+    text: TextSpan(text: text, style: style),
+    textDirection: TextDirection.ltr,
+    maxLines: 1,
+  )..layout(maxWidth: double.infinity);
+  final w = painter.width;
+  painter.dispose();
+  return w;
+}
+
+// ── HyphenatedParagraph widget ─────────────────────────────────────────────
+
+/// Renders [text] with a visible '-' inserted only where a line break
+/// actually falls at a syllable boundary.
+///
+/// Algorithm (runs inside [LayoutBuilder], so the available width is known):
+///   1. Tokenise the text into alternating word / whitespace tokens.
+///   2. Walk tokens left-to-right, tracking [lineWidth] — how many pixels
+///      are already consumed on the current visual line.
+///   3. For each *word* token:
+///        • If it fits on the remaining line space → append as-is.
+///        • If it does NOT fit → ask the hyphenator for its syllable
+///          segments, then greedily find the last segment boundary where
+///          `lineWidth + width(prefix + '-')` still fits.
+///          If such a boundary exists, emit `prefix-\u200Bsuffix`.
+///          The U+200B (ZERO WIDTH SPACE) is a Unicode line-break
+///          opportunity that Flutter's text engine honours: it wraps there
+///          and renders nothing, so the '-' appears at the end of the line
+///          and 'suffix' starts the next line.
+///        • If no syllable fits with the hyphen → fall through to natural
+///          word wrap (Flutter wraps at the preceding space).
+///   4. Whitespace tokens are appended unchanged; a '\n' resets lineWidth.
+class HyphenatedParagraph extends StatelessWidget {
+  final String text;
+  final TextStyle style;
+  final TextAlign textAlign;
+  final EdgeInsets padding;
+  final String languageCode;
+
+  const HyphenatedParagraph({
+    super.key,
+    required this.text,
+    required this.style,
+    required this.textAlign,
+    required this.languageCode,
+    this.padding = EdgeInsets.zero,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return const SizedBox.shrink();
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final displayed = _compute(
+          text: trimmed,
+          style: style,
+          maxWidth: constraints.maxWidth - padding.horizontal,
+          languageCode: languageCode,
+        );
+        return Padding(
+          padding: padding,
+          child: Text(displayed, style: style, textAlign: textAlign),
+        );
+      },
+    );
   }
 
-  // Create hyphenator based on language code
-  final hyphenator = switch (languageCode.toLowerCase()) {
-    'it' => Hyphenator(Language_it(), symbol: '-'),
-    'de_1996' || 'de' => Hyphenator(Language_de_1996(), symbol: '-'),
-    'fr' => Hyphenator(Language_fr(), symbol: '-'),
-    'es' => Hyphenator(Language_es(), symbol: '-'),
-    'pt' => Hyphenator(Language_pt(), symbol: '-'),
-    _ => Hyphenator(Language_en_us(), symbol: '-'),
-  };
+  // ── Core algorithm ─────────────────────────────────────────────────────
 
-  _hyphenators[languageCode] = hyphenator;
-  return hyphenator;
-}
+  static String _compute({
+    required String text,
+    required TextStyle style,
+    required double maxWidth,
+    required String languageCode,
+  }) {
+    if (maxWidth <= 0) return text;
 
-/// Checks if the hyphenator is ready for synchronous use.
-bool isHyphenatorReady() => _hyphenators.isNotEmpty;
+    final hyphenator = getHyphenator(languageCode);
+    final result = StringBuffer();
+    double lineWidth = 0;
 
-/// Processes HTML content and inserts soft hyphens into text nodes.
-///
-/// This function parses the HTML, finds text content within tags,
-/// and hyphenates words while preserving HTML structure.
-String hyphenateHtmlContent(String html, [String languageCode = 'en_us']) {
-  final hyphenator = getHyphenator(languageCode);
-  return _processHtmlNodes(html, hyphenator);
-}
+    // Tokenise into runs of non-whitespace and runs of whitespace.
+    final tokenRe = RegExp(r'\S+|\s+');
 
-/// Processes HTML content synchronously (requires hyphenator to be loaded).
-///
-/// Returns the original HTML if hyphenator is not ready.
-String hyphenateHtmlContentSync(String html, [String languageCode = 'en_us']) {
-  if (!_hyphenators.containsKey(languageCode)) {
-    return html;
-  }
-  return _processHtmlNodes(html, _hyphenators[languageCode]!);
-}
+    for (final match in tokenRe.allMatches(text)) {
+      final token = match.group(0)!;
 
-/// Recursively processes HTML content to hyphenate text nodes.
-String _processHtmlNodes(String html, Hyphenator hyphenator) {
-  // Simple approach: find text between tags and hyphenate it
-  // This regex matches text content (not tags)
-  final buffer = StringBuffer();
-  int pos = 0;
+      // ── Whitespace token ─────────────────────────────────────────────
+      if (token.trim().isEmpty) {
+        result.write(token);
+        if (token.contains('\n')) {
+          lineWidth = 0;
+        } else {
+          lineWidth += _measureWidth(token, style);
+        }
+        continue;
+      }
 
-  while (pos < html.length) {
-    // Find the next tag
-    final tagStart = html.indexOf('<', pos);
-    if (tagStart == -1) {
-      // No more tags, hyphenate the rest
-      final text = html.substring(pos);
-      buffer.write(_hyphenateText(text, hyphenator));
-      break;
+      // ── Word token ───────────────────────────────────────────────────
+      final wordWidth = _measureWidth(token, style);
+
+      if (lineWidth + wordWidth <= maxWidth) {
+        // Word fits on the current line — no hyphenation needed.
+        result.write(token);
+        lineWidth += wordWidth;
+        continue;
+      }
+
+      // Word does NOT fit. Ask the hyphenator for syllable segments.
+      final syllables = hyphenator.hyphenateText(token).split('\u00AD');
+
+      if (syllables.length > 1) {
+        // Find the rightmost break where prefix + '-' still fits.
+        int bestBreak = -1;
+
+        for (int i = 0; i < syllables.length - 1; i++) {
+          final prefix = syllables.sublist(0, i + 1).join('');
+          if (lineWidth + _measureWidth('$prefix-', style) <= maxWidth) {
+            bestBreak = i;
+          } else {
+            // Syllables only grow longer; no point checking further.
+            break;
+          }
+        }
+
+        if (bestBreak >= 0) {
+          final prefix = syllables.sublist(0, bestBreak + 1).join('');
+          final suffix = syllables.sublist(bestBreak + 1).join('');
+          // U+200B lets Flutter wrap here; '-' is visible at end of line.
+          result.write('$prefix-\u200B$suffix');
+          lineWidth = _measureWidth(suffix, style);
+          continue;
+        }
+      }
+
+      // Cannot hyphenate (or first syllable already too wide).
+      // Let Flutter handle the natural word wrap at the preceding space.
+      result.write(token);
+      lineWidth = wordWidth;
     }
 
-    // Add hyphenated text before the tag
-    if (tagStart > pos) {
-      final text = html.substring(pos, tagStart);
-      buffer.write(_hyphenateText(text, hyphenator));
-    }
-
-    // Find the end of the tag
-    final tagEnd = html.indexOf('>', tagStart);
-    if (tagEnd == -1) {
-      // Malformed HTML, add the rest as-is
-      buffer.write(html.substring(tagStart));
-      break;
-    }
-
-    // Add the tag as-is
-    final tag = html.substring(tagStart, tagEnd + 1);
-    buffer.write(tag);
-    pos = tagEnd + 1;
+    return result.toString();
   }
-
-  return buffer.toString();
 }
-
-/// Hyphenates plain text, preserving whitespace and special characters.
-///
-/// The hyphenatorx library handles spaces internally, so we can pass
-/// the entire text block directly.
-String _hyphenateText(String text, Hyphenator hyphenator) {
-  // Don't process if it contains HTML entities or looks like a tag
-  if (text.contains('<') || text.contains('&')) {
-    return text;
-  }
-
-  // Skip if no actual text content
-  if (text.trim().isEmpty) {
-    return text;
-  }
-
-  // hyphenatorx.hyphenateText handles spaces internally
-  return hyphenator.hyphenateText(text);
-}
-
