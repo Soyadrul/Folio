@@ -66,6 +66,7 @@ class SettingsScreen extends ConsumerWidget {
                     ? (v) => notifier.update((s) => s.copyWith(hyphenation: v))
                     : null,
               ),
+              _buildHyphenationLanguageSelector(context, settings, notifier),
               _buildSliderTile(
                 context,
                 label: 'Font Size',
@@ -316,6 +317,53 @@ class SettingsScreen extends ConsumerWidget {
           );
         }).toList(),
       ),
+    );
+  }
+
+  // ── Hyphenation language selector ─────────────────────────────────────────
+
+  Widget _buildHyphenationLanguageSelector(
+    BuildContext context,
+    AppSettings settings,
+    SettingsNotifier notifier,
+  ) {
+    // Available hyphenation languages
+    const languages = [
+      ('en_us', 'English (US)'),
+      ('it', 'Italian'),
+      ('de_1996', 'German'),
+      ('fr', 'French'),
+      ('es', 'Spanish'),
+      ('pt', 'Portuguese'),
+    ];
+
+    final isEnabled = settings.hyphenation && settings.textAlign == TextAlign.justify;
+
+    return ListTile(
+      title: Text('Hyphenation Language', style: _tileTextStyle(context)),
+      subtitle: Text(
+        languages.firstWhere(
+          (lang) => lang.$1 == settings.hyphenationLanguage,
+          orElse: () => ('en_us', 'English (US)'),
+        ).$2,
+        style: _subtitleStyle(context),
+      ),
+      trailing: isEnabled
+          ? PopupMenuButton<(String, String)>(
+              onSelected: (lang) => notifier.update(
+                (s) => s.copyWith(hyphenationLanguage: lang.$1),
+              ),
+              itemBuilder: (context) => languages
+                  .map(
+                    (lang) => PopupMenuItem<(String, String)>(
+                      value: lang,
+                      child: Text(lang.$2),
+                    ),
+                  )
+                  .toList(),
+            )
+          : const Text('Requires justified text'),
+      enabled: isEnabled,
     );
   }
 

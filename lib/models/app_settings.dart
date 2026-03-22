@@ -25,6 +25,10 @@ class AppSettings {
   /// Whether hyphenation is enabled for the book text.
   final bool hyphenation;
 
+  /// Language code for hyphenation (e.g., 'en_us', 'it', 'de_1996').
+  /// Defaults to 'en_us' for English US.
+  final String hyphenationLanguage;
+
   // ── Layout ────────────────────────────────────────────────────────────────
 
   /// Horizontal padding (left + right) applied around the book text.
@@ -49,6 +53,7 @@ class AppSettings {
     this.lineHeight = 1.65,
     this.textAlign = TextAlign.justify,
     this.hyphenation = true,
+    this.hyphenationLanguage = 'en_us',
     this.marginHorizontal = 20.0,
     this.readingMode = ReadingMode.auto,
     this.keepScreenOn = true,
@@ -61,6 +66,7 @@ class AppSettings {
     double? lineHeight,
     TextAlign? textAlign,
     bool? hyphenation,
+    String? hyphenationLanguage,
     double? marginHorizontal,
     ReadingMode? readingMode,
     bool? keepScreenOn,
@@ -72,6 +78,7 @@ class AppSettings {
       lineHeight: lineHeight ?? this.lineHeight,
       textAlign: textAlign ?? this.textAlign,
       hyphenation: hyphenation ?? this.hyphenation,
+      hyphenationLanguage: hyphenationLanguage ?? this.hyphenationLanguage,
       marginHorizontal: marginHorizontal ?? this.marginHorizontal,
       readingMode: readingMode ?? this.readingMode,
       keepScreenOn: keepScreenOn ?? this.keepScreenOn,
@@ -87,6 +94,7 @@ class AppSettings {
         'lineHeight': lineHeight,
         'textAlign': textAlign.index,
         'hyphenation': hyphenation,
+        'hyphenationLanguage': hyphenationLanguage,
         'marginHorizontal': marginHorizontal,
         'readingMode': readingMode.index,
         'keepScreenOn': keepScreenOn,
@@ -100,6 +108,7 @@ class AppSettings {
         textAlign: TextAlign
             .values[json['textAlign'] as int? ?? TextAlign.justify.index],
         hyphenation: json['hyphenation'] as bool? ?? true,
+        hyphenationLanguage: json['hyphenationLanguage'] as String? ?? 'en_us',
         marginHorizontal:
             (json['marginHorizontal'] as num?)?.toDouble() ?? 20.0,
         readingMode: ReadingMode

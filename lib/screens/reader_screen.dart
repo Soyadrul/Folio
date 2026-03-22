@@ -11,7 +11,18 @@ import '../models/app_settings.dart';
 import '../models/book.dart';
 import '../providers/library_provider.dart';
 import '../providers/settings_provider.dart';
+import '../utils/hyphenation_utils.dart';
 import '../utils/theme_utils.dart';
+
+/// Extension type for accessing EpubChapterViewValue properties.
+/// EpubChapterViewValue is not publicly exported by epub_view, so we use
+/// an extension type to provide type-safe access to its properties.
+extension type EpubChapterViewValue._(dynamic value) {
+  // ignore: avoid_dynamic_calls
+  int get chapterNumber => value.chapterNumber as int;
+  // ignore: avoid_dynamic_calls
+  double get progress => value.progress as double;
+}
 
 class ReaderScreen extends ConsumerStatefulWidget {
   final Book book;
@@ -40,16 +51,28 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   void initState() {
     super.initState();
 
+    // Pre-initialize hyphenator for the selected language.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final settings = ref.read(settingsNotifierProvider);
+      getHyphenator(settings.hyphenationLanguage);
+    });
+
     // Open the epub at the last saved chapter, or from the beginning.
     _epubController = EpubController(
       document: EpubDocument.openFile(File(widget.book.path)),
     );
 
-    // Restore saved chapter index after the first frame.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final savedChapter = widget.book.lastChapterIndex;
-      if (savedChapter > 0) {
-        _epubController.scrollTo(index: savedChapter);
+    // Listen for book loaded event and restore chapter position.
+    _epubController.isBookLoaded.addListener(() {
+      if (_epubController.isBookLoaded.value) {
+        // Wait for the scrollable list to be laid out.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          final savedChapter = widget.book.lastChapterIndex;
+          if (savedChapter > 0) {
+            _epubController.scrollTo(index: savedChapter);
+          }
+        });
       }
     });
 
@@ -97,20 +120,21 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
 
   void _onValueChanged(dynamic value) {
     if (value == null) return;
-    // Extract progress and chapter from the value object
-    final map = value as Map;
-    final progress = map['progress'] as num? ?? 0.0;
-    final chapterIndex = map['chapterNumber'] as int? ?? 0;
+
+    // Wrap dynamic value in extension type for type-safe property access.
+    final chapterValue = EpubChapterViewValue._(value);
+    final chapterNumber = chapterValue.chapterNumber;
+    final progress = chapterValue.progress;
 
     setState(() {
-      _progress = progress.toDouble().clamp(0.0, 1.0);
-      _currentChapter = chapterIndex;
+      _progress = progress.clamp(0.0, 1.0);
+      _currentChapter = chapterNumber;
     });
 
     // Persist reading progress to the library state.
     ref.read(libraryProvider.notifier).updateReadingProgress(
           widget.book.path,
-          chapterIndex,
+          chapterNumber,
           _progress,
         );
   }
@@ -218,12 +242,20 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
 
           final options = builders.options as DefaultBuilderOptions;
 
+          // Apply hyphenation to HTML content if enabled and text is justified.
+          final htmlContent = paragraphs[index].element.outerHtml;
+          final shouldHyphenate =
+              settings.hyphenation && settings.textAlign == TextAlign.justify;
+          final processedHtml = shouldHyphenate
+              ? hyphenateHtmlContentSync(htmlContent, settings.hyphenationLanguage)
+              : htmlContent;
+
           return Column(
             children: <Widget>[
               if (chapterIndex >= 0 && paragraphIndex == 0)
                 builders.chapterDividerBuilder(chapters[chapterIndex]),
               Html(
-                data: paragraphs[index].element.outerHtml,
+                data: processedHtml,
                 onLinkTap: (href, _, __) =>
                     onExternalLinkPressed(href!),
                 style: {
