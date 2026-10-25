@@ -96,6 +96,7 @@ jobs:
         IS_MANUAL: ${{ github.event_name == 'workflow_dispatch' }}
         MANUAL_VERSION: ${{ github.event.inputs.version }}
         COMMIT_MSG: ${{ github.event.head_commit.message }}
+        REF: ${{ github.ref }}
       run: |
         # Check if we're publishing (need version) or just building (no version needed)
         if [[ "$SHOULD_PUBLISH" == "false" ]]; then
@@ -108,21 +109,27 @@ jobs:
         # Publishing mode: Version is required
         echo "📦 Publishing mode: Determining release version..."
 
+        # create-release only runs on main. A manual dispatch from another ref
+        # would build successfully and then silently skip the release, so fail
+        # here instead of reporting a green run that published nothing.
+        if [[ "$IS_MANUAL" == "true" ]] && [[ "$REF" != "refs/heads/main" ]]; then
+          echo "❌ ERROR: Releases can only be published from main (current ref: $REF)"
+          echo "   Re-run the workflow with the main branch selected, or choose build-only."
+          exit 1
+        fi
+
         # Check if manual trigger with version provided
         if [[ "$IS_MANUAL" == "true" ]] && [[ -n "$MANUAL_VERSION" ]]; then
-          # Use manually provided version
-          # Ensure it starts with 'v'
-          if [[ "$MANUAL_VERSION" =~ ^v ]]; then
-            VERSION="$MANUAL_VERSION"
-          else
-            VERSION="v$MANUAL_VERSION"
-          fi
+          # Use manually provided version, normalizing the 'v' prefix (accepts 'V').
+          VERSION="v${MANUAL_VERSION#[vV]}"
           echo "📝 Using manually specified version: $VERSION"
         else
-          # Try to extract version from commit message
-          if [[ "$COMMIT_MSG" =~ v?([0-9]+\.[0-9]+\.[0-9]+) ]]; then
-            # Found semantic version in commit message
-            VERSION="v${BASH_REMATCH[1]}"
+          # Try to extract version from commit message. The version must be a
+          # standalone, 'v'-prefixed token so unrelated numbers (dependency
+          # bumps, branch names) are not mistaken for a release version, and
+          # pre-release suffixes such as -rc.1 are preserved.
+          if [[ "$COMMIT_MSG" =~ (^|[[:space:]])v([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?)([[:space:]]|$) ]]; then
+            VERSION="v${BASH_REMATCH[2]}"
             echo "📝 Version extracted from commit message: $VERSION"
           else
             # No version found: Generate from current date and short commit SHA
@@ -140,6 +147,13 @@ jobs:
         if [[ ! "$VERSION" =~ ^v[0-9][0-9A-Za-z.+-]*$ ]]; then
           echo "❌ ERROR: Invalid release version: '$VERSION'"
           echo "   Use a version such as v1.2.0 or v1.2.0-rc.1"
+          exit 1
+        fi
+
+        # The regex above is a superset of valid tag names: reject refs git
+        # itself refuses (e.g. v1..2, v1.0.0.) before the release step runs.
+        if ! git check-ref-format "refs/tags/$VERSION"; then
+          echo "❌ ERROR: Release version is not a valid git tag: '$VERSION'"
           exit 1
         fi
 
@@ -302,15 +316,29 @@ jobs:
         KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        # "none" for build-only runs, otherwise the release tag to stamp in.
+        RELEASE_VERSION: ${{ needs.check-trigger.outputs.version }}
       run: |
         case ${{ matrix.target }} in
           android)
             echo "🤖 Building Android APK with release signing..."
             
+            # All four signing secrets are required. Check them all up front so
+            # a missing alias/password fails here rather than inside Gradle
+            # with a misleading "keystore was tampered with" error.
+            MISSING_SECRETS=""
+            for name in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_PASSWORD KEY_ALIAS; do
+              if [ -z "${!name}" ]; then
+                MISSING_SECRETS="$MISSING_SECRETS $name"
+              fi
+            done
+
             # Check if release signing secrets are configured in GitHub
-            if [ -z "$KEYSTORE_BASE64" ]; then
+            if [ -n "$MISSING_SECRETS" ]; then
               # CRITICAL: No signing secrets found - FAIL THE BUILD
-              echo "❌ ERROR: Release keystore not configured in GitHub Secrets"
+              echo "❌ ERROR: Release signing is not fully configured in GitHub Secrets"
+              echo ""
+              echo "Missing secret(s):$MISSING_SECRETS"
               echo ""
               echo "Android builds REQUIRE release signing for production."
               echo ""
@@ -366,33 +394,40 @@ jobs:
                 exit 1
               fi
               
-              # Build the release APK with signing
+              # Build the release APK with signing. When publishing, stamp the
+              # release tag into versionName and use the monotonic workflow run
+              # number as versionCode so each release is distinguishable.
               echo ""
-              flutter build apk --release
+              if [[ -n "$RELEASE_VERSION" ]] && [[ "$RELEASE_VERSION" != "none" ]]; then
+                flutter build apk --release \
+                  --build-name="${RELEASE_VERSION#v}" \
+                  --build-number="$GITHUB_RUN_NUMBER"
+              else
+                flutter build apk --release
+              fi
               
               # Verify the APK signature to ensure it was signed correctly
               echo ""
               echo "🔍 Verifying APK signature..."
 
-              # Check if APK is signed using apksigner (more reliable for modern APK signatures)
-              if apksigner verify --verbose build/app/outputs/flutter-apk/app-release.apk 2>&1 | grep -q "Verified using v1 scheme" || \
-                 apksigner verify --verbose build/app/outputs/flutter-apk/app-release.apk 2>&1 | grep -q "Verified using v2 scheme" || \
-                 apksigner verify --verbose build/app/outputs/flutter-apk/app-release.apk 2>&1 | grep -q "Verified using v3 scheme"; then
-                echo "✅ APK is properly signed with signature scheme v1, v2, or v3!"
+              APK=build/app/outputs/flutter-apk/app-release.apk
+
+              # apksigner's exit status is authoritative. Grepping its --verbose
+              # text is unreliable because it also prints lines such as
+              # "Verified using v1 scheme (JAR signing): false".
+              if apksigner verify --verbose "$APK"; then
+                echo "✅ APK signature verified successfully"
                 
-                # Show signature details
+                # Show which certificate signed the APK
                 echo ""
                 echo "📋 Signature Details:"
-                apksigner verify build/app/outputs/flutter-apk/app-release.apk
+                apksigner verify --print-certs "$APK"
               else
-                echo "❌ ERROR: APK is NOT signed!"
+                echo "❌ ERROR: APK signature verification failed!"
                 echo ""
                 echo "Debugging information:"
                 echo "Keystore file location:"
                 ls -lh android/app/*.jks || echo "No keystore files found in android/app/"
-                echo ""
-                echo "APK signature verification output:"
-                apksigner verify --verbose build/app/outputs/flutter-apk/app-release.apk
                 echo ""
                 exit 1
               fi
@@ -498,6 +533,12 @@ jobs:
           exit 1
         fi
 
+        # The regex is a superset of valid tag names; let git decide.
+        if ! git check-ref-format "refs/tags/$VERSION"; then
+          echo "ERROR: Version is not a valid git tag name: $VERSION"
+          exit 1
+        fi
+
         # Basic validation - version should start with 'v' followed by numbers/dots
         if [[ ! "$VERSION" =~ ^v[0-9]+\. ]]; then
           echo "WARNING: Version tag doesn't follow standard semantic versioning: $VERSION"
@@ -573,10 +614,13 @@ jobs:
         # Auto-generate release notes from commit messages since last release
         generate_release_notes: true
 
-        # Upload all platform builds to the release (Linux and Android only)
+        # Upload all platform builds to the release (Linux and Android only).
+        # Fail rather than silently creating a release without assets if an
+        # artifact name or path ever drifts.
         files: |
           artifacts/${{ github.event.repository.name }}-Android/*.apk
           artifacts/${{ github.event.repository.name }}-Linux/*.tar.gz
+        fail_on_unmatched_files: true
         
         # Release description with download instructions
         body: |
@@ -618,9 +662,10 @@ jobs:
           ### 🔐 Security & Signing Information
           
           - **Android APK**: Signed with production release keystore
-          - **Verification**: You can verify the APK signature using:
+          - **Verification**: You can verify the APK signature using `apksigner`
+            (from the Android SDK build-tools):
             ```bash
-            jarsigner -verify -verbose -certs ${{ github.event.repository.name }}-Android.apk
+            apksigner verify --print-certs ${{ github.event.repository.name }}-Android.apk
             ```
           
           ### ⚠️ Installation Notes
