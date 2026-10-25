@@ -5,6 +5,10 @@
 
 name: Flutter Build and Release
 
+# Default to a read-only token; jobs that need more request it explicitly.
+permissions:
+  contents: read
+
 # Workflow Triggers
 on:
   # Trigger on pushes to any branch (but ignore markdown file changes)
@@ -42,11 +46,9 @@ jobs:
       version: ${{ steps.version.outputs.version }}
 
     steps:
-    # Checkout repository to access commit history
+    # Checkout repository (no history needed: everything comes from the event)
     - name: Checkout repository
       uses: actions/checkout@v6
-      with:
-        fetch-depth: 0  # Fetch full history to read commit messages
 
     # Check if the commit message contains [BUILD] and/or [PUBLISH] trigger keywords
     - name: Check for [BUILD] and [PUBLISH] triggers
@@ -131,6 +133,14 @@ jobs:
             echo "💡 Tip: Include version in commit message for releases:"
             echo "   Example: git commit -m '[BUILD] [PUBLISH] v1.2.0 - New features'"
           fi
+        fi
+
+        # The version becomes a git tag and a $GITHUB_OUTPUT line, where a
+        # newline would inject extra output keys. Require a single safe word.
+        if [[ ! "$VERSION" =~ ^v[0-9][0-9A-Za-z.+-]*$ ]]; then
+          echo "❌ ERROR: Invalid release version: '$VERSION'"
+          echo "   Use a version such as v1.2.0 or v1.2.0-rc.1"
+          exit 1
         fi
 
         echo "version=$VERSION" >> "$GITHUB_OUTPUT"
@@ -324,18 +334,21 @@ jobs:
               # Decode the base64-encoded keystore file into android/app/.
               # Remove signing material on both success and failure.
               trap 'rm -f android/app/release-keystore.jks android/key.properties' EXIT
-              umask 077
-              printf '%s' "$KEYSTORE_BASE64" | base64 --decode > android/app/release-keystore.jks
 
-              # Create key.properties with printf so '$' and backticks in
-              # secret values are preserved literally instead of expanding.
-              {
-                printf 'storePassword=%s\n' "$KEYSTORE_PASSWORD"
-                printf 'keyPassword=%s\n' "$KEY_PASSWORD"
-                printf 'keyAlias=%s\n' "$KEY_ALIAS"
-                printf 'storeFile=app/release-keystore.jks\n'
-              } > android/key.properties
-              chmod 600 android/key.properties android/app/release-keystore.jks
+              # Create both files 0600 inside a subshell so the restrictive
+              # umask does not leak onto later build outputs. printf keeps the
+              # secret values verbatim and sidesteps heredoc indentation rules.
+              (
+                umask 077
+                printf '%s' "$KEYSTORE_BASE64" | base64 --decode > android/app/release-keystore.jks
+
+                {
+                  printf 'storePassword=%s\n' "$KEYSTORE_PASSWORD"
+                  printf 'keyPassword=%s\n' "$KEY_PASSWORD"
+                  printf 'keyAlias=%s\n' "$KEY_ALIAS"
+                  printf 'storeFile=app/release-keystore.jks\n'
+                } > android/key.properties
+              )
               
               # Display the key.properties for debugging (without sensitive data)
               echo ""
@@ -469,15 +482,22 @@ jobs:
     # -------------------------------------------------------------------------
     # Ensures the version tag is properly formatted before creating a release
     - name: Validate version tag
+      env:
+        VERSION: ${{ needs.check-trigger.outputs.version }}
       run: |
-        VERSION="${{ needs.check-trigger.outputs.version }}"
-        
         if [[ "$VERSION" == "none" ]] || [[ -z "$VERSION" ]]; then
           echo "ERROR: Invalid version tag: $VERSION"
           echo "The version was not properly determined in the check-trigger job"
           exit 1
         fi
-        
+
+        # Defensive re-check: the value is no longer interpolated into shell
+        # code, but a git tag must still be a single safe word.
+        if [[ ! "$VERSION" =~ ^v[0-9][0-9A-Za-z.+-]*$ ]]; then
+          echo "ERROR: Refusing to release with malformed version tag: $VERSION"
+          exit 1
+        fi
+
         # Basic validation - version should start with 'v' followed by numbers/dots
         if [[ ! "$VERSION" =~ ^v[0-9]+\. ]]; then
           echo "WARNING: Version tag doesn't follow standard semantic versioning: $VERSION"
@@ -496,6 +516,8 @@ jobs:
         BEFORE: ${{ github.event.before }}
         REPOSITORY: ${{ github.repository }}
         SHA: ${{ github.sha }}
+        # Empty on manual dispatch, where there is no head commit.
+        COMMIT_TIME: ${{ github.event.head_commit.timestamp }}
       run: |
         if [[ "$EVENT_NAME" == "push" && -n "$BEFORE" && "$BEFORE" != "0000000000000000000000000000000000000000" ]]; then
           printf 'changelog=**Full Changelog**: https://github.com/%s/compare/%s...%s\n' \
@@ -503,7 +525,10 @@ jobs:
         else
           printf 'changelog=\n' >> "$GITHUB_OUTPUT"
         fi
-        printf 'build_date=%s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
+        # Prefer the commit's own timestamp so re-runs report the same date;
+        # fall back to now for manual dispatch.
+        BUILD_DATE="${COMMIT_TIME:-$(date -u +'%Y-%m-%dT%H:%M:%SZ')}"
+        printf 'build_date=%s\n' "$BUILD_DATE" >> "$GITHUB_OUTPUT"
 
     # -------------------------------------------------------------------------
     # Step 2: Download all build artifacts from build job
@@ -640,12 +665,14 @@ jobs:
     # Step 5: Workflow completion message
     # -------------------------------------------------------------------------
     - name: Release created successfully
+      env:
+        VERSION: ${{ needs.check-trigger.outputs.version }}
       run: |
         echo "================================"
         echo "✅ DRAFT RELEASE CREATED!"
         echo "================================"
         echo ""
-        echo "📦 Version: ${{ needs.check-trigger.outputs.version }}"
+        echo "📦 Version: $VERSION"
         echo "🔗 View at: https://github.com/${{ github.repository }}/releases"
         echo ""
         echo "📝 Next Steps:"
