@@ -51,34 +51,33 @@ jobs:
     # Check if the commit message contains [BUILD] and/or [PUBLISH] trigger keywords
     - name: Check for [BUILD] and [PUBLISH] triggers
       id: check
+      env:
+        # Pass event data through env so it is never interpolated into Bash.
+        COMMIT_MSG: ${{ github.event.head_commit.message }}
+        IS_MANUAL: ${{ github.event_name == 'workflow_dispatch' }}
+        REQUESTED_ACTION: ${{ github.event.inputs.action }}
       run: |
-        # Extract the latest commit message
-        COMMIT_MSG="${{ github.event.head_commit.message }}"
-        
-        # Determine if this is a manual workflow dispatch
-        IS_MANUAL="${{ github.event_name == 'workflow_dispatch' }}"
-        
         # Check if [BUILD] appears in the commit message or manual trigger
         if [[ "$COMMIT_MSG" =~ \[BUILD\] ]] || [[ "$IS_MANUAL" == "true" ]]; then
-          echo "should_build=true" >> $GITHUB_OUTPUT
+          echo "should_build=true" >> "$GITHUB_OUTPUT"
           echo "✅ Build trigger detected"
         else
-          echo "should_build=false" >> $GITHUB_OUTPUT
+          echo "should_build=false" >> "$GITHUB_OUTPUT"
           echo "⏭️  No build trigger found, skipping build"
         fi
-        
+
         # Check if BOTH [BUILD] and [PUBLISH] appear in the commit message
         # OR if manual trigger is set to "Build and publish release"
         if [[ "$COMMIT_MSG" =~ \[BUILD\] ]] && [[ "$COMMIT_MSG" =~ \[PUBLISH\] ]]; then
-          echo "should_publish=true" >> $GITHUB_OUTPUT
+          echo "should_publish=true" >> "$GITHUB_OUTPUT"
           echo "✅ Publish trigger detected: Both [BUILD] and [PUBLISH] found in commit"
           echo "📦 A GitHub release will be created after build completes"
-        elif [[ "$IS_MANUAL" == "true" ]] && [[ "${{ github.event.inputs.action }}" == "Build and publish release" ]]; then
-          echo "should_publish=true" >> $GITHUB_OUTPUT
+        elif [[ "$IS_MANUAL" == "true" ]] && [[ "$REQUESTED_ACTION" == "Build and publish release" ]]; then
+          echo "should_publish=true" >> "$GITHUB_OUTPUT"
           echo "✅ Manual publish selected: Build and publish release"
           echo "📦 A GitHub release will be created after build completes"
         else
-          echo "should_publish=false" >> $GITHUB_OUTPUT
+          echo "should_publish=false" >> "$GITHUB_OUTPUT"
           if [[ "$COMMIT_MSG" =~ \[BUILD\] ]] || [[ "$IS_MANUAL" == "true" ]]; then
             echo "ℹ️  Build-only mode: Testing compilation without creating release"
           fi
@@ -89,24 +88,25 @@ jobs:
     # Only required if publishing a release (not for build-only mode)
     - name: Determine version number
       id: version
+      env:
+        # Pass event data through env so it is never interpolated into Bash.
+        SHOULD_PUBLISH: ${{ steps.check.outputs.should_publish }}
+        IS_MANUAL: ${{ github.event_name == 'workflow_dispatch' }}
+        MANUAL_VERSION: ${{ github.event.inputs.version }}
+        COMMIT_MSG: ${{ github.event.head_commit.message }}
       run: |
         # Check if we're publishing (need version) or just building (no version needed)
-        SHOULD_PUBLISH="${{ steps.check.outputs.should_publish }}"
-        
         if [[ "$SHOULD_PUBLISH" == "false" ]]; then
           # Build-only mode: No version needed, just testing compilation
-          echo "version=none" >> $GITHUB_OUTPUT
+          echo "version=none" >> "$GITHUB_OUTPUT"
           echo "ℹ️  Build-only mode: Version not required (no release will be created)"
           exit 0
         fi
-        
+
         # Publishing mode: Version is required
         echo "📦 Publishing mode: Determining release version..."
-        
+
         # Check if manual trigger with version provided
-        IS_MANUAL="${{ github.event_name == 'workflow_dispatch' }}"
-        MANUAL_VERSION="${{ github.event.inputs.version }}"
-        
         if [[ "$IS_MANUAL" == "true" ]] && [[ -n "$MANUAL_VERSION" ]]; then
           # Use manually provided version
           # Ensure it starts with 'v'
@@ -118,8 +118,6 @@ jobs:
           echo "📝 Using manually specified version: $VERSION"
         else
           # Try to extract version from commit message
-          COMMIT_MSG="${{ github.event.head_commit.message }}"
-          
           if [[ "$COMMIT_MSG" =~ v?([0-9]+\.[0-9]+\.[0-9]+) ]]; then
             # Found semantic version in commit message
             VERSION="v${BASH_REMATCH[1]}"
@@ -134,8 +132,8 @@ jobs:
             echo "   Example: git commit -m '[BUILD] [PUBLISH] v1.2.0 - New features'"
           fi
         fi
-        
-        echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+        echo "version=$VERSION" >> "$GITHUB_OUTPUT"
         echo "✅ Release version will be: $VERSION"
 
   # ============================================================================
@@ -323,19 +321,21 @@ jobs:
               echo "✅ Release keystore found in GitHub Secrets"
               echo "Building signed APK for production distribution..."
               
-              # Decode the base64-encoded keystore file
-              # Place it in android/app/ directory where Gradle expects it
-              echo "$KEYSTORE_BASE64" | base64 --decode > android/app/release-keystore.jks
-              
-              # Create key.properties file in android/ directory
-              # For Kotlin DSL build.gradle.kts: file() resolves from android/app/ directory
-              # So we use just the filename "release-keystore.jks"
-              cat > android/key.properties << EOF
-        storePassword=$KEYSTORE_PASSWORD
-        keyPassword=$KEY_PASSWORD
-        keyAlias=$KEY_ALIAS
-        storeFile=app/release-keystore.jks
-        EOF
+              # Decode the base64-encoded keystore file into android/app/.
+              # Remove signing material on both success and failure.
+              trap 'rm -f android/app/release-keystore.jks android/key.properties' EXIT
+              umask 077
+              printf '%s' "$KEYSTORE_BASE64" | base64 --decode > android/app/release-keystore.jks
+
+              # Create key.properties with printf so '$' and backticks in
+              # secret values are preserved literally instead of expanding.
+              {
+                printf 'storePassword=%s\n' "$KEYSTORE_PASSWORD"
+                printf 'keyPassword=%s\n' "$KEY_PASSWORD"
+                printf 'keyAlias=%s\n' "$KEY_ALIAS"
+                printf 'storeFile=app/release-keystore.jks\n'
+              } > android/key.properties
+              chmod 600 android/key.properties android/app/release-keystore.jks
               
               # Display the key.properties for debugging (without sensitive data)
               echo ""
@@ -384,11 +384,7 @@ jobs:
                 exit 1
               fi
               
-              # Clean up sensitive files for security
-              # Never leave keystore files or passwords in the workspace
-              rm -f android/app/release-keystore.jks
-              rm -f android/key.properties
-              
+              # The EXIT trap removes the keystore and key.properties.
               echo ""
               echo "✅ Signed APK created and verified successfully!"
             fi
@@ -463,6 +459,8 @@ jobs:
     needs: [check-trigger, build]
     # Only run if BOTH build trigger AND publish trigger are true AND on main branch
     if: needs.check-trigger.outputs.should_build == 'true' && needs.check-trigger.outputs.should_publish == 'true' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
 
     steps:
@@ -487,6 +485,25 @@ jobs:
         fi
         
         echo "Validated version tag: $VERSION"
+
+    # -------------------------------------------------------------------------
+    # Step 1.1: Prepare metadata that differs between push and manual runs
+    # -------------------------------------------------------------------------
+    - name: Prepare release metadata
+      id: metadata
+      env:
+        EVENT_NAME: ${{ github.event_name }}
+        BEFORE: ${{ github.event.before }}
+        REPOSITORY: ${{ github.repository }}
+        SHA: ${{ github.sha }}
+      run: |
+        if [[ "$EVENT_NAME" == "push" && -n "$BEFORE" && "$BEFORE" != "0000000000000000000000000000000000000000" ]]; then
+          printf 'changelog=**Full Changelog**: https://github.com/%s/compare/%s...%s\n' \
+            "$REPOSITORY" "$BEFORE" "$SHA" >> "$GITHUB_OUTPUT"
+        else
+          printf 'changelog=\n' >> "$GITHUB_OUTPUT"
+        fi
+        printf 'build_date=%s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
 
     # -------------------------------------------------------------------------
     # Step 2: Download all build artifacts from build job
@@ -520,6 +537,9 @@ jobs:
       with:
         # Use version number determined in check-trigger job
         tag_name: ${{ needs.check-trigger.outputs.version }}
+        # Tag the exact commit that produced these artifacts, not the current
+        # tip of the default branch.
+        target_commitish: ${{ github.sha }}
         name: ${{ github.event.repository.name }} ${{ needs.check-trigger.outputs.version }}
 
         # Create as draft - allows you to review and edit before publishing
@@ -563,10 +583,10 @@ jobs:
             cd bundle
             
             # Make the executable runnable (if needed)
-            chmod +x ${{ github.event.repository.name }}
-            
+            chmod +x folio
+
             # Run the application
-            ./${{ github.event.repository.name }}
+            ./folio
             ```
           - **Requirements**: GTK3 libraries (usually pre-installed on modern Linux distributions)
           
@@ -605,11 +625,11 @@ jobs:
           
           ---
           
-          **Full Changelog**: https://github.com/${{ github.repository }}/compare/${{ github.event.before }}...${{ github.sha }}
-          
+          ${{ steps.metadata.outputs.changelog }}
+
           **Build Information**:
           - Build Commit: `${{ github.sha }}`
-          - Build Date: ${{ github.event.head_commit.timestamp }}
+          - Build Date: ${{ steps.metadata.outputs.build_date }}
           - Platforms: Android (ARM), Linux (x64)
       
       env:
