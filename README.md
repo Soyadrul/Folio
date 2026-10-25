@@ -59,8 +59,8 @@ folio_reader/
 
 | Tool | Minimum version |
 |---|---|
-| Flutter SDK | 3.24.0 |
-| Dart SDK | 3.4.0 |
+| Flutter SDK | 3.38.4 |
+| Dart SDK | 3.11.0 |
 | Android Studio / SDK | API 35 (Android 15) |
 | CMake | 3.13 (Linux only) |
 | GTK3 dev headers | `libgtk-3-dev` (Linux only) |

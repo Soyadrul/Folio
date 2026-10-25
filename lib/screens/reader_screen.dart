@@ -278,7 +278,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
             // Non-text child or hyphenation off → flutter_html as before.
             return Html(
               data: child.outerHtml,
-              onLinkTap: (href, _, __) => onExternalLinkPressed(href!),
+              onLinkTap: (href, _, _) => onExternalLinkPressed(href!),
               style: {
                 'html': Style(
                   padding: HtmlPaddings.only(
@@ -312,7 +312,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
           if (children.isEmpty) {
             return Html(
               data: element.outerHtml,
-              onLinkTap: (href, _, __) => onExternalLinkPressed(href!),
+              onLinkTap: (href, _, _) => onExternalLinkPressed(href!),
               style: {
                 'html': Style(
                   textAlign: settings.textAlign,

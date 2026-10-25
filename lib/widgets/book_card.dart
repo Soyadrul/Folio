@@ -47,7 +47,7 @@ class BookCard extends StatelessWidget {
                     ? Image.memory(
                         book.coverImage!,
                         fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => _buildPlaceholder(context),
+                        errorBuilder: (_, _, _) => _buildPlaceholder(context),
                       )
                     : _buildPlaceholder(context),
               ),
