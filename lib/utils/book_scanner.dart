@@ -35,6 +35,7 @@ Future<List<Book>> scanFolderForBooks(String folderPath) async {
       path: path,
       title: (item?['title'] as String?) ?? p.basenameWithoutExtension(path),
       author: (item?['author'] as String?) ?? 'Unknown Author',
+      lastModifiedMs: (item?['modified'] as int?) ?? 0,
     );
   }).toList();
 
@@ -45,18 +46,26 @@ Future<List<Book>> scanFolderForBooks(String folderPath) async {
 Future<List<Map<String, Object?>>> _readAllMetadata(List<String> paths) async {
   final result = <Map<String, Object?>>[];
   for (final path in paths) {
+    var modified = 0;
+    try {
+      modified = (await File(path).lastModified()).millisecondsSinceEpoch;
+    } on FileSystemException {
+      modified = 0;
+    }
     try {
       final metadata = await readEpubMetadata(path);
       result.add({
         'path': path,
         'title': metadata.title,
         'author': metadata.author,
+        'modified': modified,
       });
     } catch (_) {
       result.add({
         'path': path,
         'title': p.basenameWithoutExtension(path),
         'author': 'Unknown Author',
+        'modified': modified,
       });
     }
   }

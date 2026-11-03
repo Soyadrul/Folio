@@ -36,6 +36,7 @@ void main() {
     expect(books.map((b) => b.title), ['New Book', 'Old Book']);
     expect(books.map((b) => p.basename(b.path)), ['a.epub', 'b.epub']);
     expect(books.every((b) => b.author.isNotEmpty), isTrue);
+    expect(books.every((b) => b.lastModifiedMs > 0), isTrue);
   });
 
   test('keeps books with broken metadata using filename fallbacks', () async {

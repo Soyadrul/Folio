@@ -7,14 +7,24 @@ import 'package:path/path.dart' as p;
 /// Helpers that build small, valid EPUB files in a temporary directory.
 class EpubFixture {
   /// Writes an EPUB with [entries] (zip path -> file contents) to [dir].
+  ///
+  /// A value may be a [String] (UTF-8 text) or a `List<int>` (binary data such
+  /// as a real image).
   static Future<File> write(
     Directory dir,
-    Map<String, String> entries, {
+    Map<String, Object> entries, {
     String name = 'book.epub',
   }) async {
     final archive = Archive();
     for (final entry in entries.entries) {
-      archive.addFile(ArchiveFile.string(entry.key, entry.value));
+      final value = entry.value;
+      if (value is String) {
+        archive.addFile(ArchiveFile.string(entry.key, value));
+      } else if (value is List<int>) {
+        archive.addFile(ArchiveFile(entry.key, value.length, value));
+      } else {
+        throw ArgumentError.value(value, entry.key, 'Unsupported entry type');
+      }
     }
     final bytes = ZipEncoder().encode(archive);
     final file = File(p.join(dir.path, name));

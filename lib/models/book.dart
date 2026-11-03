@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 /// Represents one EPUB book found in the user's library folder.
 class Book {
   /// Absolute path to the .epub file on disk.
@@ -11,22 +9,23 @@ class Book {
   /// Author name extracted from the EPUB metadata.
   final String author;
 
-  /// Raw bytes of the cover image (may be null if the epub has no cover).
-  final Uint8List? coverImage;
-
   /// Last opened chapter index – used to resume reading.
   final int lastChapterIndex;
 
   /// Reading progress within the last chapter (0.0 – 1.0).
   final double lastProgress;
 
+  /// File modification time when the book was scanned. Used to notice a
+  /// replaced file after a refresh without re-reading every cover.
+  final int lastModifiedMs;
+
   const Book({
     required this.path,
     required this.title,
     required this.author,
-    this.coverImage,
     this.lastChapterIndex = 0,
     this.lastProgress = 0.0,
+    this.lastModifiedMs = 0,
   });
 
   /// Creates a copy of this book with some fields replaced.
@@ -34,18 +33,17 @@ class Book {
     String? path,
     String? title,
     String? author,
-    Uint8List? coverImage,
-    bool clearCover = false,
     int? lastChapterIndex,
     double? lastProgress,
+    int? lastModifiedMs,
   }) {
     return Book(
       path: path ?? this.path,
       title: title ?? this.title,
       author: author ?? this.author,
-      coverImage: clearCover ? null : (coverImage ?? this.coverImage),
       lastChapterIndex: lastChapterIndex ?? this.lastChapterIndex,
       lastProgress: lastProgress ?? this.lastProgress,
+      lastModifiedMs: lastModifiedMs ?? this.lastModifiedMs,
     );
   }
 
