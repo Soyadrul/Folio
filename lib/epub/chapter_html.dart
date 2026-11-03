@@ -49,7 +49,7 @@ ChapterContent rewriteChapterHtml(
   String? rewrite(String? raw, {bool isLink = false}) {
     if (raw == null || raw.trim().isEmpty) return raw;
     final value = raw.trim();
-    if (value.startsWith('javascript:')) return null;
+    if (value.toLowerCase().startsWith('javascript:')) return null;
 
     final resolved = resolver.resolve(value, basePath: chapterPath);
     if (resolved.isExternal) return value;
@@ -92,6 +92,21 @@ ChapterContent rewriteChapterHtml(
       continue;
     }
 
+    if (tag == 'svg') {
+      // Without this, a book's `<image>` may be stretched when the SVG box is
+      // scaled down to the page.
+      var hasViewBox = false;
+      var hasPreserveAspectRatio = false;
+      for (final key in element.attributes.keys) {
+        final name = _attributeName(key).toLowerCase();
+        if (name == 'viewbox') hasViewBox = true;
+        if (name == 'preserveaspectratio') hasPreserveAspectRatio = true;
+      }
+      if (hasViewBox && !hasPreserveAspectRatio) {
+        element.attributes['preserveAspectRatio'] = 'xMidYMid meet';
+      }
+    }
+
     // Book scripts and inline handlers must not run inside the reader shell.
     for (final name in element.attributes.keys.toList()) {
       if (name.toString().toLowerCase().startsWith('on')) {
@@ -103,9 +118,7 @@ ChapterContent rewriteChapterHtml(
 
     const urlAttributes = {'src', 'href', 'xlink:href', 'poster', 'data'};
     for (final key in element.attributes.keys.toList()) {
-      final attribute = key is AttributeName
-          ? (key.prefix == null ? key.name : '${key.prefix}:${key.name}')
-          : key.toString();
+      final attribute = _attributeName(key);
       if (!urlAttributes.contains(attribute.toLowerCase())) continue;
       final rewritten = rewrite(element.attributes[key], isLink: isLink);
       if (rewritten == null) {
@@ -168,6 +181,13 @@ ChapterContent rewriteChapterHtml(
     bodyClass: body.attributes['class'],
     bodyStyle: body.attributes['style'],
   );
+}
+
+String _attributeName(Object key) {
+  if (key is AttributeName) {
+    return key.prefix == null ? key.name : '${key.prefix}:${key.name}';
+  }
+  return key.toString();
 }
 
 String _rewriteCssUrls(

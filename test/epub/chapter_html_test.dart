@@ -85,5 +85,65 @@ void main() {
       );
       expect(c.bodyHtml, contains('file:///cache/book/OEBPS/images/other.png'));
     });
+
+    test('resolves encoded and differently-cased image names', () {
+      final c = rewrite('<img src="../IMAGES/PIC.jpg"/>');
+      expect(
+        c.bodyHtml,
+        contains('src="file:///cache/book/OEBPS/images/pic.jpg"'),
+      );
+    });
+
+    test('keeps aspect ratio information on SVG with a viewBox', () {
+      final c = rewrite(
+        '<svg viewBox="0 0 600 900"><image xlink:href="../images/pic.jpg" '
+        'width="600" height="900"/></svg>',
+      );
+      expect(c.bodyHtml, contains('viewBox="0 0 600 900"'));
+      expect(c.bodyHtml, contains('preserveAspectRatio="xMidYMid meet"'));
+      expect(c.bodyHtml, contains('width="600"'));
+    });
+
+    test('drops a missing SVG image but keeps the surrounding SVG', () {
+      final c = rewrite(
+        '<svg viewBox="0 0 10 10"><image href="../images/gone.png"/></svg>',
+      );
+      expect(c.bodyHtml, contains('<svg'));
+      expect(c.bodyHtml, isNot(contains('gone.png')));
+      expect(c.bodyHtml, contains('data-folio-missing-image'));
+      expect(c.missingResources, contains('OEBPS/images/gone.png'));
+    });
+
+    test('keeps data and external image URLs untouched', () {
+      final c = rewrite(
+        '<img src="data:image/png;base64,AAAA"/>'
+        '<img src="https://example.com/pic.png"/>',
+      );
+      expect(c.bodyHtml, contains('src="data:image/png;base64,AAAA"'));
+      expect(c.bodyHtml, contains('src="https://example.com/pic.png"'));
+    });
+
+    test('rewrites CSS urls in style attributes and style blocks', () {
+      final c = rewrite(
+        '<html><head><style>'
+        '.x{background:url("../IMAGES/PIC.jpg")}</style></head>'
+        '<body><p style="background-image:url(../images/other.png)">x</p>'
+        '</body></html>',
+      );
+      expect(
+        c.bodyHtml,
+        contains('file:///cache/book/OEBPS/images/other.png'),
+      );
+      expect(
+        c.headHtml,
+        contains('url("file:///cache/book/OEBPS/images/pic.jpg")'),
+      );
+    });
+
+    test('hides a missing image but keeps the rest of the chapter', () {
+      final c = rewrite('<img src="../images/gone.png"/>');
+      expect(c.bodyHtml, contains('data-folio-missing-image'));
+      expect(c.bodyHtml, isNot(contains('gone.png')));
+    });
   });
 }

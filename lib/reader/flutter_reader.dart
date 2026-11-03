@@ -79,6 +79,9 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
     final chapter = widget.document.chapters[index];
     final content = await widget.document.loadChapterContent(chapter);
     if (!mounted) return;
+    for (final missing in content.missingResources) {
+      debugPrint('Folio: missing resource in ${chapter.href}: $missing');
+    }
     setState(() {
       _chapterIndex = index;
     });

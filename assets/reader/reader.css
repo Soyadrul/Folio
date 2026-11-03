@@ -74,13 +74,15 @@ body {
   text-underline-offset: 2px;
 }
 
+/* Images never exceed the text column or one screen, and keep their ratio.
+   `height: auto` is what makes width/height attributes scale together; it must
+   not be applied to SVG <image>, whose geometry lives in width/height. */
 #folio-content img,
-#folio-content svg,
-#folio-content image,
 #folio-content video,
 #folio-content object,
 #folio-content iframe {
   max-width: 100% !important;
+  max-height: var(--folio-image-max-height) !important;
   height: auto !important;
   object-fit: contain;
   break-inside: avoid;
@@ -88,13 +90,32 @@ body {
   page-break-inside: avoid;
 }
 
-#folio-content img,
-#folio-content svg,
-#folio-content image {
+#folio-content svg {
+  display: block;
+  margin: 0 auto;
+  max-width: 100% !important;
   max-height: var(--folio-image-max-height) !important;
+  height: auto !important;
+  overflow: hidden;
+  break-inside: avoid;
+  -webkit-column-break-inside: avoid;
+  page-break-inside: avoid;
 }
 
-#folio-content img[data-folio-missing-image] {
+/* Cover pages often use an SVG without a viewBox. Give it a full-page box so
+   its <image> is letterboxed instead of falling back to the 300x150 default. */
+#folio-content svg:not([viewBox]):not([viewbox]) {
+  width: 100% !important;
+  height: var(--folio-image-max-height) !important;
+}
+
+#folio-content svg image {
+  break-inside: avoid;
+  -webkit-column-break-inside: avoid;
+}
+
+#folio-content img[data-folio-missing-image],
+#folio-content image[data-folio-missing-image] {
   display: none !important;
 }
 

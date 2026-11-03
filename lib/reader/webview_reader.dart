@@ -470,7 +470,6 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
   bool get autoScrollRunning => _autoScrollRunning;
   int get autoScrollSpeed => _autoScrollSpeed;
   @override
-  @override
   int get currentChapter => _currentChapter;
   double get lastProgress => _lastProgress;
 

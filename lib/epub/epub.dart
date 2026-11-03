@@ -117,7 +117,10 @@ class EpubDocument {
 
   /// Reads and rewrites [chapter] for the WebView.
   Future<ChapterContent> loadChapterContent(EpubChapter chapter) async {
-    final raw = await File(chapter.path).readAsString();
+    final bytes = await File(chapter.path).readAsBytes();
+    // Some older books are not valid UTF-8; replacement characters are much
+    // better than refusing to open the chapter.
+    final raw = utf8.decode(bytes, allowMalformed: true);
     return rewriteChapterHtml(
       raw,
       chapterPath: chapter.relPath,

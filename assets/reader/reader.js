@@ -541,15 +541,35 @@
 
   function onImageError(event) {
     const target = event.target;
-    if (!target || !target.tagName || String(target.tagName).toLowerCase() !== 'img') {
-      return;
-    }
-    const src = target.getAttribute('src') || '';
+    if (!target || !target.tagName) return;
+    const tag = String(target.tagName).toLowerCase();
+    if (tag !== 'img' && tag !== 'image') return;
+    const src =
+      target.getAttribute('src') ||
+      target.getAttribute('href') ||
+      target.getAttributeNS('http://www.w3.org/1999/xlink', 'href') ||
+      '';
     if (state.missing.indexOf(src) === -1) {
       state.missing.push(src);
       post('missingImage', { src: src });
     }
     target.setAttribute('data-folio-missing-image', '');
+  }
+
+  // Images, stylesheets and fonts change the height of the column flow, so
+  // pagination must be recomputed after each of them has loaded.
+  function onResourceLoad(event) {
+    const target = event.target;
+    if (!target || !target.tagName) return;
+    const tag = String(target.tagName).toLowerCase();
+    if (
+      tag === 'img' ||
+      tag === 'image' ||
+      tag === 'link' ||
+      tag === 'style'
+    ) {
+      relayout(80);
+    }
   }
 
   function onResize() {
@@ -592,10 +612,16 @@
   document.addEventListener('pointerup', onPointerUp, { passive: true });
   document.addEventListener('click', onLinkClick, true);
   document.addEventListener('error', onImageError, true);
+  document.addEventListener('load', onResourceLoad, true);
   scroller().addEventListener('scroll', onScroll, { passive: true });
   window.addEventListener('resize', onResize);
   document.addEventListener('gesturestart', function (e) {
     e.preventDefault();
   });
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(function () {
+      relayout(0);
+    });
+  }
   relayout(0);
 })();
