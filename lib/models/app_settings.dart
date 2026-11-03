@@ -11,6 +11,18 @@ enum ReaderMode { book, scroll }
 ///
 /// Serialised to / from JSON and stored in [SharedPreferences].
 class AppSettings {
+  // ── Supported ranges (section 8 of the specification) ────────────────────
+  static const double minFontSize = 10;
+  static const double maxFontSize = 40;
+  static const double minLineHeight = 1.0;
+  static const double maxLineHeight = 2.2;
+  static const double minMargin = 0;
+  static const double maxMargin = 48;
+  static const double minTapZoneWidth = 15;
+  static const double maxTapZoneWidth = 45;
+  static const double minScrollSpeed = 5;
+  static const double maxScrollSpeed = 300;
+
   // ── Typography ────────────────────────────────────────────────────────────
 
   /// Font size in logical pixels for the book body text.
@@ -19,7 +31,7 @@ class AppSettings {
   /// Font family name recognised by [GoogleFonts] (e.g. 'Merriweather').
   final String fontFamily;
 
-  /// Line height multiplier (1.0 = tight, 2.0 = very airy).
+  /// Line height multiplier (1.0 = tight, 2.2 = very airy).
   final double lineHeight;
 
   /// Text alignment for the book body text.
@@ -92,12 +104,12 @@ class AppSettings {
   const AppSettings({
     this.fontSize = 18.0,
     this.fontFamily = 'Merriweather',
-    this.lineHeight = 1.65,
+    this.lineHeight = 1.5,
     this.textAlign = TextAlign.justify,
     this.hyphenation = true,
     this.hyphenationLanguage = 'en_us',
-    this.marginHorizontal = 20.0,
-    this.readingMode = ReadingMode.auto,
+    this.marginHorizontal = 16.0,
+    this.readingMode = ReadingMode.light,
     this.keepScreenOn = true,
     this.showProgressBar = true,
     this.readerMode = ReaderMode.book,
@@ -190,31 +202,68 @@ class AppSettings {
   };
 
   factory AppSettings.fromJson(Map<String, dynamic> json) => AppSettings(
-    fontSize: (json['fontSize'] as num?)?.toDouble() ?? 18.0,
+    fontSize: _number(json['fontSize'], 18.0, minFontSize, maxFontSize),
     fontFamily: json['fontFamily'] as String? ?? 'Merriweather',
-    lineHeight: (json['lineHeight'] as num?)?.toDouble() ?? 1.65,
-    textAlign:
-        TextAlign.values[json['textAlign'] as int? ?? TextAlign.justify.index],
+    lineHeight: _number(json['lineHeight'], 1.5, minLineHeight, maxLineHeight),
+    textAlign: _enumValue(
+      TextAlign.values,
+      json['textAlign'],
+      TextAlign.justify,
+    ),
     hyphenation: json['hyphenation'] as bool? ?? true,
     hyphenationLanguage: json['hyphenationLanguage'] as String? ?? 'en_us',
-    marginHorizontal: (json['marginHorizontal'] as num?)?.toDouble() ?? 20.0,
-    readingMode: ReadingMode
-        .values[json['readingMode'] as int? ?? ReadingMode.auto.index],
+    marginHorizontal: _number(
+      json['marginHorizontal'],
+      16.0,
+      minMargin,
+      maxMargin,
+    ),
+    readingMode: _enumValue(
+      ReadingMode.values,
+      json['readingMode'],
+      ReadingMode.light,
+    ),
     keepScreenOn: json['keepScreenOn'] as bool? ?? true,
     showProgressBar: json['showProgressBar'] as bool? ?? true,
-    readerMode:
-        ReaderMode.values[json['readerMode'] as int? ?? ReaderMode.book.index],
+    readerMode: _enumValue(
+      ReaderMode.values,
+      json['readerMode'],
+      ReaderMode.book,
+    ),
     volumeButtonsTurnPages: json['volumeButtonsTurnPages'] as bool? ?? true,
     invertVolumeButtons: json['invertVolumeButtons'] as bool? ?? false,
     tapZones: json['tapZones'] as bool? ?? true,
-    tapZoneWidth: (json['tapZoneWidth'] as num?)?.toDouble() ?? 30.0,
+    tapZoneWidth: _number(
+      json['tapZoneWidth'],
+      30.0,
+      minTapZoneWidth,
+      maxTapZoneWidth,
+    ),
     swipeToTurnPage: json['swipeToTurnPage'] as bool? ?? true,
     pageAnimation: json['pageAnimation'] as bool? ?? true,
-    autoScrollSpeed: (json['autoScrollSpeed'] as num?)?.toDouble() ?? 40.0,
+    autoScrollSpeed: _number(
+      json['autoScrollSpeed'],
+      40.0,
+      minScrollSpeed,
+      maxScrollSpeed,
+    ),
     tapToStartStop: json['tapToStartStop'] as bool? ?? true,
     volumeButtonsChangeSpeed: json['volumeButtonsChangeSpeed'] as bool? ?? true,
     scrollAutoStart: json['scrollAutoStart'] as bool? ?? false,
   );
+
+  /// Reads a numeric setting, falling back to [fallback] for bad data and
+  /// clamping old or hand-edited values to the supported range.
+  static double _number(Object? raw, double fallback, double min, double max) {
+    final value = raw is num ? raw.toDouble() : fallback;
+    if (value.isNaN || value.isInfinite) return fallback;
+    return value.clamp(min, max).toDouble();
+  }
+
+  static T _enumValue<T>(List<T> values, Object? raw, T fallback) {
+    if (raw is int && raw >= 0 && raw < values.length) return values[raw];
+    return fallback;
+  }
 
   String toJsonString() => jsonEncode(toJson());
 
