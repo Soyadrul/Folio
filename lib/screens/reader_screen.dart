@@ -1,197 +1,445 @@
+import 'dart:async';
 import 'dart:io';
 
-import 'package:epub_view/epub_view.dart' hide Image;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_html/flutter_html.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import '../epub/epub.dart';
 import '../models/app_settings.dart';
 import '../models/book.dart';
 import '../providers/library_provider.dart';
 import '../providers/settings_provider.dart';
-import '../utils/hyphenation_utils.dart';
+import '../reader/flutter_reader.dart';
+import '../reader/reader_content_controller.dart';
+import '../reader/webview_reader.dart';
 import '../utils/theme_utils.dart';
+import 'settings_screen.dart';
 
-/// Extension type for accessing EpubChapterViewValue properties.
-/// EpubChapterViewValue is not publicly exported by epub_view, so we use
-/// an extension type to provide type-safe access to its properties.
-extension type EpubChapterViewValue._(dynamic value) {
-  // ignore: avoid_dynamic_calls
-  int get chapterNumber => value.chapterNumber as int;
-  // ignore: avoid_dynamic_calls
-  double get progress => value.progress as double;
-}
-
+/// The reading screen. It owns the book chrome (title, TOC, progress) and
+/// mounts either the Android WebView or the Flutter fallback.
 class ReaderScreen extends ConsumerStatefulWidget {
-  final Book book;
-
   const ReaderScreen({super.key, required this.book});
+
+  final Book book;
 
   @override
   ConsumerState<ReaderScreen> createState() => _ReaderScreenState();
 }
 
 class _ReaderScreenState extends ConsumerState<ReaderScreen>
-    with SingleTickerProviderStateMixin {
-  late EpubController _epubController;
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
+  final ReaderContentController _content = ReaderContentController();
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
-  // ── UI overlay visibility ──────────────────────────────────────────────
-  bool _uiVisible = false;
-  late AnimationController _fadeController;
-  late Animation<double> _fadeAnimation;
+  EpubDocument? _document;
+  String? _error;
+  String? _runtimeError;
 
-  // ── Reading progress ───────────────────────────────────────────────────
-  double _progress = 0.0;
-  int _currentChapter = 0;
+  int _chapterIndex = 0;
+  double _chapterProgress = 0;
+  String? _element;
+  int _page = 1;
+  int _pages = 1;
   int _totalChapters = 0;
+
+  bool _uiVisible = true;
+  late final AnimationController _fade;
+  late final Animation<double> _fadeAnimation;
+
+  bool _autoRunning = false;
+  int _autoSpeed = 40;
+
+  Timer? _saveTimer;
+  int _lastSavedMs = 0;
+
+  bool get _usesWebView => Platform.isAndroid;
 
   @override
   void initState() {
     super.initState();
-
-    // Pre-initialize hyphenator for the selected language.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final settings = ref.read(settingsNotifierProvider);
-      getHyphenator(settings.hyphenationLanguage);
-    });
-
-    // Open the epub at the last saved chapter, or from the beginning.
-    _epubController = EpubController(
-      document: EpubDocument.openFile(File(widget.book.path)),
-    );
-
-    // Listen for book loaded event and restore chapter position.
-    _epubController.isBookLoaded.addListener(() {
-      if (_epubController.isBookLoaded.value) {
-        // Wait for the scrollable list to be laid out.
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!mounted) return;
-          final savedChapter = widget.book.lastChapterIndex;
-          if (savedChapter > 0) {
-            _epubController.scrollTo(index: savedChapter);
-          }
-        });
-      }
-    });
-
-    _fadeController = AnimationController(
+    WidgetsBinding.instance.addObserver(this);
+    _chapterIndex = widget.book.lastChapterIndex;
+    _chapterProgress = widget.book.lastProgress;
+    _fade = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 220),
+      duration: const Duration(milliseconds: 200),
     );
-    _fadeAnimation = CurvedAnimation(
-      parent: _fadeController,
-      curve: Curves.easeInOut,
-    );
-
-    // Enter immersive full-screen mode.
+    _fadeAnimation = CurvedAnimation(parent: _fade, curve: Curves.easeOut);
+    _fade.value = 1;
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    _openBook();
   }
 
   @override
   void dispose() {
-    _epubController.dispose();
-    _fadeController.dispose();
-    // Restore system UI when leaving the reader.
+    WidgetsBinding.instance.removeObserver(this);
+    _saveTimer?.cancel();
+    _persistPosition(force: true);
+    _fade.dispose();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     super.dispose();
   }
 
-  // ── UI toggle ──────────────────────────────────────────────────────────
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) {
+      _content.pauseAutoScroll();
+    } else if (_uiVisible) {
+      _fade.forward();
+    }
+  }
+
+  Future<void> _openBook() async {
+    try {
+      final document = await EpubLoader().load(widget.book.path);
+      if (!mounted) return;
+      final index = _chapterIndex.clamp(0, document.chapters.length - 1);
+      setState(() {
+        _document = document;
+        _chapterIndex = index;
+        _totalChapters = document.chapters.length;
+      });
+    } on EpubException catch (e) {
+      if (!mounted) return;
+      setState(() => _error = e.message);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = 'This book could not be opened: $e');
+    }
+  }
+
+  // ── Chrome ────────────────────────────────────────────────────────────────
 
   void _toggleUI() {
     setState(() => _uiVisible = !_uiVisible);
     if (_uiVisible) {
-      _fadeController.forward();
+      _fade.forward();
     } else {
-      _fadeController.reverse();
+      _fade.reverse();
     }
   }
 
-  void _hideUI() {
-    if (_uiVisible) {
-      setState(() => _uiVisible = false);
-      _fadeController.reverse();
-    }
+  void _openSettings() {
+    _content.pauseAutoScroll();
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const SettingsScreen()));
   }
 
-  // ── Progress / chapter update ──────────────────────────────────────────
-
-  void _onValueChanged(dynamic value) {
-    if (value == null) return;
-
-    // Wrap dynamic value in extension type for type-safe property access.
-    final chapterValue = EpubChapterViewValue._(value);
-    final chapterNumber = chapterValue.chapterNumber;
-    final progress = chapterValue.progress;
-
+  void _onProgress(ReaderProgressEvent event) {
+    if (!mounted) return;
     setState(() {
-      _progress = progress.clamp(0.0, 1.0);
-      _currentChapter = chapterNumber;
+      _chapterIndex = event.chapterIndex;
+      _chapterProgress = event.progress;
+      _element = event.element;
+      _page = event.page;
+      _pages = event.pages;
     });
+    _scheduleSave();
+  }
 
-    // Persist reading progress to the library state.
-    ref.read(libraryProvider.notifier).updateReadingProgress(
+  void _scheduleSave() {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (now - _lastSavedMs < 500) {
+      _saveTimer?.cancel();
+      _saveTimer = Timer(
+        Duration(milliseconds: 500 - (now - _lastSavedMs)),
+        () => _persistPosition(),
+      );
+      return;
+    }
+    _persistPosition();
+  }
+
+  void _persistPosition({bool force = false}) {
+    if (!force && _document == null) return;
+    _lastSavedMs = DateTime.now().millisecondsSinceEpoch;
+    ref
+        .read(libraryProvider.notifier)
+        .updateReadingProgress(
           widget.book.path,
-          chapterNumber,
-          _progress,
+          _chapterIndex,
+          _chapterProgress,
         );
   }
 
-  // ── Build ──────────────────────────────────────────────────────────────
+  double get _overallProgress {
+    final document = _document;
+    if (document == null || document.totalChapterBytes == 0) {
+      return 0;
+    }
+    var before = 0;
+    for (var i = 0; i < _chapterIndex && i < document.chapters.length; i++) {
+      before += document.chapters[i].byteSize;
+    }
+    final current = _chapterIndex < document.chapters.length
+        ? document.chapters[_chapterIndex].byteSize
+        : 0;
+    return ((before + current * _chapterProgress) / document.totalChapterBytes)
+        .clamp(0.0, 1.0);
+  }
+
+  // ── Build ─────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
     final settings = ref.watch(settingsNotifierProvider);
     final brightness = MediaQuery.of(context).platformBrightness;
-    final bgColor = readerBackground(settings.readingMode, brightness);
-    final textColor = readerTextColor(settings.readingMode, brightness);
-    final isDarkBg = ThemeData.estimateBrightnessForColor(bgColor) == Brightness.dark;
+    final background = readerBackground(settings.readingMode, brightness);
+    final foreground = readerTextColor(settings.readingMode, brightness);
+    _autoSpeed = settings.autoScrollSpeed.round();
 
+    if (_error != null) {
+      return _buildError(settings, background, foreground);
+    }
+
+    final document = _document;
     return Theme(
-      // Apply a local theme that matches the chosen reading mode.
-      data: isDarkBg ? buildDarkTheme() : buildLightTheme(),
+      data: ThemeData(
+        useMaterial3: true,
+        brightness:
+            ThemeData.estimateBrightnessForColor(background) == Brightness.dark
+            ? Brightness.dark
+            : Brightness.light,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: kAccentColor,
+          brightness:
+              ThemeData.estimateBrightnessForColor(background) ==
+                  Brightness.dark
+              ? Brightness.dark
+              : Brightness.light,
+        ),
+      ),
       child: Scaffold(
-        backgroundColor: bgColor,
-        // Tapping the side areas toggles the overlay; the TOC opens via
-        // the app bar icon.
-        drawer: _buildTocDrawer(textColor, bgColor),
-        body: GestureDetector(
-          behavior: HitTestBehavior.translucent,
-          onTap: _toggleUI,
-          child: Stack(
-            children: [
-              // ── EPUB content ────────────────────────────────────────
-              Padding(
-                padding: EdgeInsets.symmetric(
-                  horizontal: settings.marginHorizontal,
-                ),
-                child: _buildEpubView(settings, brightness),
-              ),
-
-              // ── Top overlay (title + controls) ──────────────────────
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: FadeTransition(
-                  opacity: _fadeAnimation,
-                  child: _buildTopBar(textColor, bgColor, settings),
-                ),
-              ),
-
-              // ── Bottom overlay (progress + chapter info) ────────────
-              if (settings.showProgressBar)
-                Positioned(
-                  bottom: 0,
-                  left: 0,
-                  right: 0,
-                  child: FadeTransition(
-                    opacity: _fadeAnimation,
-                    child: _buildBottomBar(textColor, bgColor),
+        key: _scaffoldKey,
+        backgroundColor: background,
+        drawer: document == null ? null : _buildToc(document, foreground),
+        body: document == null
+            ? _buildLoading(background, foreground)
+            : Stack(
+                children: [
+                  Positioned.fill(
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: settings.marginHorizontal,
+                      ),
+                      child: _buildContent(document, settings),
+                    ),
                   ),
-                ),
+                  if (_runtimeError != null)
+                    Positioned(
+                      left: 16,
+                      right: 16,
+                      bottom: 72,
+                      child: Material(
+                        color: Colors.black87,
+                        borderRadius: BorderRadius.circular(10),
+                        child: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Text(
+                            _runtimeError!,
+                            style: const TextStyle(color: Colors.white),
+                          ),
+                        ),
+                      ),
+                    ),
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: FadeTransition(
+                      opacity: _fadeAnimation,
+                      child: IgnorePointer(
+                        ignoring: !_uiVisible,
+                        child: _buildTopBar(settings, foreground, background),
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    child: FadeTransition(
+                      opacity: _fadeAnimation,
+                      child: IgnorePointer(
+                        ignoring: !_uiVisible,
+                        child: _buildBottomBar(
+                          settings,
+                          foreground,
+                          background,
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (_autoRunning && !_uiVisible)
+                    Positioned(
+                      top: 14,
+                      right: 14,
+                      child: IgnorePointer(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 5,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.55),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                            '▶ $_autoSpeed px/s',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+      ),
+    );
+  }
+
+  Widget _buildContent(EpubDocument document, AppSettings settings) {
+    final callbacks = ReaderCallbacks(
+      onProgress: _onProgress,
+      onPage: (page, pages) {
+        if (!mounted) return;
+        setState(() {
+          _page = page;
+          _pages = pages;
+        });
+      },
+      onChapterChanged: (index) {
+        if (!mounted) return;
+        setState(() {
+          _chapterIndex = index;
+          _chapterProgress = 0;
+          _page = 1;
+        });
+      },
+      onToggleChrome: _toggleUI,
+      onAutoScroll: (running, speed) {
+        if (!mounted) return;
+        setState(() {
+          _autoRunning = running;
+          _autoSpeed = speed;
+        });
+      },
+      onBoundary: (direction) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            SnackBar(
+              content: Text(
+                direction > 0 ? 'End of the book.' : 'Start of the book.',
+              ),
+              duration: const Duration(milliseconds: 900),
+            ),
+          );
+      },
+      onError: (message) {
+        if (!mounted) return;
+        setState(() => _runtimeError = message);
+      },
+    );
+
+    if (_usesWebView) {
+      return WebViewReader(
+        document: document,
+        settings: settings,
+        callbacks: callbacks,
+        controller: _content,
+        initialChapter: _chapterIndex,
+        initialProgress: _chapterProgress,
+        initialElement: _element,
+      );
+    }
+    return FlutterReader(
+      document: document,
+      settings: settings,
+      callbacks: callbacks,
+      controller: _content,
+      initialChapter: _chapterIndex,
+      initialProgress: _chapterProgress,
+      initialElement: _element,
+    );
+  }
+
+  Widget _buildLoading(Color background, Color foreground) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: 28,
+            height: 28,
+            child: CircularProgressIndicator(
+              strokeWidth: 2.5,
+              color: kAccentColor,
+              backgroundColor: foreground.withValues(alpha: 0.12),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            widget.book.title,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: GoogleFonts.lato(
+              fontSize: 14,
+              color: foreground.withValues(alpha: 0.7),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildError(AppSettings settings, Color background, Color foreground) {
+    return Scaffold(
+      backgroundColor: background,
+      appBar: AppBar(
+        backgroundColor: background,
+        foregroundColor: foreground,
+        title: Text(
+          widget.book.title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+      ),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.menu_book_rounded,
+                size: 56,
+                color: kAccentColor.withValues(alpha: 0.7),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'This book cannot be opened',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                _error ?? 'Unknown error',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 20),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Back to library'),
+              ),
             ],
           ),
         ),
@@ -199,252 +447,167 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     );
   }
 
-  // ── EPUB View ──────────────────────────────────────────────────────────
+  // ── Top bar ──────────────────────────────────────────────────────────────
 
-  Widget _buildEpubView(AppSettings settings, Brightness brightness) {
-    final textStyle = readerBodyTextStyle(
-      settings: settings,
-      systemBrightness: brightness,
-    );
-    final textColor = readerTextColor(settings.readingMode, brightness);
-    
-    final shouldHyphenate =
-      settings.hyphenation && settings.textAlign == TextAlign.justify;
-
-    return EpubView(
-      key: ValueKey(settings.toJsonString()),
-      controller: _epubController,
-      onDocumentLoaded: (document) {
-        setState(() {
-          _totalChapters = document.Chapters?.length ?? 0;
-        });
-      },
-      onChapterChanged: _onValueChanged,
-      builders: EpubViewBuilders<DefaultBuilderOptions>(
-        options: DefaultBuilderOptions(
-          textStyle: textStyle,
-          paragraphPadding: EdgeInsets.zero,
-        ),
-        chapterDividerBuilder: (_) => Divider(
-          height: 48,
-          color: textColor.withValues(alpha: 0.15),
-        ),
-        chapterBuilder: (
-          context,
-          builders,
-          document,
-          chapters,
-          paragraphs,
-          index,
-          chapterIndex,
-          paragraphIndex,
-          onExternalLinkPressed,
-        ) {
-          if (paragraphs.isEmpty) return Container();
-
-          final options = builders.options as DefaultBuilderOptions;
-          final element = paragraphs[index].element;
-
-          // epub_view gives us a <section> container. Walk its children so we
-          // can hyphenate each <p>, <h1>, etc. individually.
-          const textTags = {
-            'p', 'div', 'li', 'blockquote',
-            'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-          };
-
-          final paraStyle = readerBodyTextStyle(
-            settings: settings,
-            systemBrightness: brightness,
-          );
-          final edgePadding = options.paragraphPadding is EdgeInsets
-              ? options.paragraphPadding as EdgeInsets
-              : EdgeInsets.zero;
-
-          // Build one widget per child element inside the section.
-          final children = element.children.map<Widget>((child) {
-            final tag = child.localName?.toLowerCase() ?? '';
-            final text = child.text.trim();
-
-            if (shouldHyphenate && textTags.contains(tag) && text.isNotEmpty) {
-              return HyphenatedParagraph(
-                text: text,
-                style: paraStyle,
-                textAlign: settings.textAlign,
-                languageCode: settings.hyphenationLanguage,
-                padding: edgePadding,
-              );
-            }
-
-            // Non-text child or hyphenation off → flutter_html as before.
-            return Html(
-              data: child.outerHtml,
-              onLinkTap: (href, _, _) => onExternalLinkPressed(href!),
-              style: {
-                'html': Style(
-                  padding: HtmlPaddings.only(
-                    top: edgePadding.top,
-                    right: edgePadding.right,
-                    bottom: edgePadding.bottom,
-                    left: edgePadding.left,
-                  ),
-                  textAlign: settings.textAlign,
-                ).merge(Style.fromTextStyle(options.textStyle)),
-              },
-              extensions: [
-                TagExtension(
-                  tagsToExtend: {'img'},
-                  builder: (imageContext) {
-                    final url =
-                        imageContext.attributes['src']!.replaceAll('../', '');
-                    final content =
-                        document.Content!.Images![url]!.Content!;
-                    return Image(
-                      image: MemoryImage(Uint8List.fromList(content)),
-                    );
-                  },
-                ),
-              ],
-            );
-          }).toList();
-
-          // If the section had no children at all, fall back to rendering the
-          // whole element via flutter_html (handles edge-case EPUBs).
-          if (children.isEmpty) {
-            return Html(
-              data: element.outerHtml,
-              onLinkTap: (href, _, _) => onExternalLinkPressed(href!),
-              style: {
-                'html': Style(
-                  textAlign: settings.textAlign,
-                ).merge(Style.fromTextStyle(options.textStyle)),
-              },
-            );
-          }
-
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (chapterIndex >= 0 && paragraphIndex == 0)
-                builders.chapterDividerBuilder(chapters[chapterIndex]),
-              ...children,
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  // ── Top overlay ────────────────────────────────────────────────────────
-
-  Widget _buildTopBar(Color textColor, Color bgColor, AppSettings settings) {
+  Widget _buildTopBar(
+    AppSettings settings,
+    Color foreground,
+    Color background,
+  ) {
+    final document = _document;
+    final title = document != null && _chapterIndex < document.chapters.length
+        ? document.chapters[_chapterIndex].title
+        : widget.book.title;
     return Container(
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: [
-            bgColor.withValues(alpha: 0.98),
-            bgColor.withValues(alpha: 0.0),
+            background.withValues(alpha: 0.98),
+            background.withValues(alpha: 0.0),
           ],
-          stops: const [0.6, 1.0],
+          stops: const [0.55, 1.0],
         ),
       ),
       child: SafeArea(
         bottom: false,
         child: Row(
           children: [
-            // Back button
             IconButton(
-              icon: Icon(Icons.arrow_back_rounded, color: textColor),
+              icon: Icon(Icons.arrow_back_rounded, color: foreground),
+              tooltip: 'Back to library',
               onPressed: () => Navigator.of(context).pop(),
             ),
-            // Book title (truncated)
             Expanded(
-              child: Text(
-                widget.book.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: GoogleFonts.lato(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: textColor.withValues(alpha: 0.85),
-                ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    widget.book.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.lato(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: foreground.withValues(alpha: 0.85),
+                    ),
+                  ),
+                  Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.lato(
+                      fontSize: 11,
+                      color: foreground.withValues(alpha: 0.55),
+                    ),
+                  ),
+                ],
               ),
             ),
-            // Table of contents
-            Builder(builder: (ctx) {
-              return IconButton(
-                icon: Icon(Icons.format_list_bulleted_rounded,
-                    color: textColor),
-                tooltip: 'Table of contents',
-                onPressed: () {
-                  _hideUI();
-                  Scaffold.of(ctx).openDrawer();
-                },
-              );
-            }),
+            if (settings.readerMode == ReaderMode.scroll)
+              IconButton(
+                icon: Icon(
+                  _autoRunning
+                      ? Icons.pause_circle_outline_rounded
+                      : Icons.play_circle_outline_rounded,
+                  color: foreground,
+                ),
+                tooltip: _autoRunning ? 'Pause scrolling' : 'Start scrolling',
+                onPressed: () => _content.toggleAutoScroll(),
+              ),
+            IconButton(
+              icon: Icon(Icons.format_list_bulleted_rounded, color: foreground),
+              tooltip: 'Table of contents',
+              onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+            ),
+            IconButton(
+              icon: Icon(Icons.settings_outlined, color: foreground),
+              tooltip: 'Settings',
+              onPressed: _openSettings,
+            ),
           ],
         ),
       ),
     );
   }
 
-  // ── Bottom overlay (progress) ──────────────────────────────────────────
+  // ── Bottom bar ───────────────────────────────────────────────────────────
 
-  Widget _buildBottomBar(Color textColor, Color bgColor) {
-    final percent = (_progress * 100).toStringAsFixed(0);
+  Widget _buildBottomBar(
+    AppSettings settings,
+    Color foreground,
+    Color background,
+  ) {
+    final percent = (_overallProgress * 100).toStringAsFixed(0);
     final chapterLabel = _totalChapters > 0
-        ? 'Ch. ${_currentChapter + 1} / $_totalChapters'
+        ? 'Ch. ${_chapterIndex + 1} / $_totalChapters'
         : '';
-
     return Container(
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.bottomCenter,
           end: Alignment.topCenter,
           colors: [
-            bgColor.withValues(alpha: 0.98),
-            bgColor.withValues(alpha: 0.0),
+            background.withValues(alpha: 0.98),
+            background.withValues(alpha: 0.0),
           ],
-          stops: const [0.55, 1.0],
+          stops: const [0.5, 1.0],
         ),
       ),
       child: SafeArea(
         top: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 10),
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Thin progress bar
-              ClipRRect(
-                borderRadius: BorderRadius.circular(2),
-                child: LinearProgressIndicator(
-                  value: _progress,
-                  minHeight: 2,
-                  backgroundColor:
-                      textColor.withValues(alpha: 0.15),
-                  valueColor:
-                      const AlwaysStoppedAnimation<Color>(kAccentColor),
-                ),
-              ),
-              const SizedBox(height: 6),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    chapterLabel,
-                    style: GoogleFonts.lato(
-                      fontSize: 11,
-                      color: textColor.withValues(alpha: 0.6),
+              if (settings.showProgressBar)
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(2),
+                  child: LinearProgressIndicator(
+                    value: _overallProgress,
+                    minHeight: 2,
+                    backgroundColor: foreground.withValues(alpha: 0.14),
+                    valueColor: const AlwaysStoppedAnimation<Color>(
+                      kAccentColor,
                     ),
                   ),
-                  Text(
-                    '$percent%',
-                    style: GoogleFonts.lato(
-                      fontSize: 11,
-                      color: textColor.withValues(alpha: 0.6),
+                ),
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  IconButton(
+                    icon: Icon(Icons.chevron_left_rounded, color: foreground),
+                    tooltip: 'Previous page',
+                    onPressed: () => _content.prevPage(),
+                  ),
+                  Expanded(
+                    child: Column(
+                      children: [
+                        Text(
+                          'Page $_page of $_pages',
+                          style: GoogleFonts.lato(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: foreground.withValues(alpha: 0.75),
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '$chapterLabel   ·   $percent%',
+                          style: GoogleFonts.lato(
+                            fontSize: 10,
+                            color: foreground.withValues(alpha: 0.5),
+                          ),
+                        ),
+                      ],
                     ),
+                  ),
+                  IconButton(
+                    icon: Icon(Icons.chevron_right_rounded, color: foreground),
+                    tooltip: 'Next page',
+                    onPressed: () => _content.nextPage(),
                   ),
                 ],
               ),
@@ -455,18 +618,30 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     );
   }
 
-  // ── TOC Drawer ─────────────────────────────────────────────────────────
+  // ── TOC drawer ───────────────────────────────────────────────────────────
 
-  Widget _buildTocDrawer(Color textColor, Color bgColor) {
+  Widget _buildToc(EpubDocument document, Color foreground) {
+    final entries = document.toc.isNotEmpty
+        ? document.toc
+        : document.chapters
+              .map(
+                (chapter) => EpubTocEntry(
+                  title: chapter.title,
+                  chapterIndex: chapter.index,
+                ),
+              )
+              .toList();
     return Drawer(
-      backgroundColor: bgColor,
+      backgroundColor: readerBackground(
+        ref.read(settingsNotifierProvider).readingMode,
+        MediaQuery.of(context).platformBrightness,
+      ),
       child: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 16, 8),
+              padding: const EdgeInsets.fromLTRB(20, 16, 12, 8),
               child: Row(
                 children: [
                   Expanded(
@@ -478,34 +653,66 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                           style: GoogleFonts.playfairDisplay(
                             fontSize: 22,
                             fontWeight: FontWeight.w700,
-                            color: textColor,
+                            color: foreground,
                           ),
                         ),
-                        const SizedBox(height: 2),
                         Text(
-                          widget.book.title,
+                          document.title,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: GoogleFonts.lato(
                             fontSize: 12,
-                            color: textColor.withValues(alpha: 0.55),
+                            color: foreground.withValues(alpha: 0.55),
                           ),
                         ),
                       ],
                     ),
                   ),
                   IconButton(
-                    icon: Icon(Icons.close_rounded, color: textColor),
+                    icon: Icon(Icons.close_rounded, color: foreground),
                     onPressed: () => Navigator.of(context).pop(),
                   ),
                 ],
               ),
             ),
-            Divider(color: textColor.withValues(alpha: 0.12)),
-
-            // Chapter list
+            Divider(color: foreground.withValues(alpha: 0.12)),
             Expanded(
-              child: EpubViewTableOfContents(controller: _epubController),
+              child: ListView.builder(
+                itemCount: entries.length,
+                itemBuilder: (context, index) {
+                  final entry = entries[index];
+                  final selected = entry.chapterIndex == _chapterIndex;
+                  return ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.only(
+                      left: 20.0 + entry.level * 14,
+                      right: 16,
+                    ),
+                    title: Text(
+                      entry.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.lato(
+                        fontSize: 14,
+                        fontWeight: selected
+                            ? FontWeight.w700
+                            : FontWeight.w400,
+                        color: selected
+                            ? kAccentColor
+                            : foreground.withValues(alpha: 0.85),
+                      ),
+                    ),
+                    onTap: () {
+                      Navigator.of(context).pop();
+                      _content.loadChapter(
+                        entry.chapterIndex,
+                        progress: 0,
+                        element: entry.fragment,
+                      );
+                    },
+                  );
+                },
+              ),
             ),
           ],
         ),

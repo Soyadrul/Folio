@@ -1,0 +1,186 @@
+/* Folio reader shell. All colours/sizes come from CSS variables set by JS. */
+:root {
+  --folio-font-size: 18px;
+  --folio-line-height: 1.5;
+  --folio-margin: 16px;
+  --folio-fg: #1a1a2e;
+  --folio-page-width: 320px;
+  --folio-page-height: 640px;
+  --folio-align: justify;
+  --folio-font-family: Georgia, 'Noto Serif', serif;
+  --folio-hyphens: auto;
+  --folio-image-max-height: 600px;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  color: var(--folio-fg);
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  overflow: hidden;
+  touch-action: manipulation;
+}
+
+#folio-viewport {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+#folio-scroll {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+#folio-content {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 100%;
+  font-family: var(--folio-font-family);
+  font-size: var(--folio-font-size);
+  line-height: var(--folio-line-height);
+  text-align: var(--folio-align);
+  hyphens: var(--folio-hyphens);
+  -webkit-hyphens: var(--folio-hyphens);
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+}
+
+/* The book's own CSS may force colours that disappear on dark/sepia themes. */
+#folio-content,
+#folio-content * {
+  color: inherit;
+}
+
+#folio-content a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: rgba(128, 128, 128, 0.55);
+  text-underline-offset: 2px;
+}
+
+#folio-content img,
+#folio-content svg,
+#folio-content image,
+#folio-content video,
+#folio-content object,
+#folio-content iframe {
+  max-width: 100% !important;
+  height: auto !important;
+  object-fit: contain;
+  break-inside: avoid;
+  -webkit-column-break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+#folio-content img,
+#folio-content svg,
+#folio-content image {
+  max-height: var(--folio-image-max-height) !important;
+}
+
+#folio-content img[data-folio-missing-image] {
+  display: none !important;
+}
+
+#folio-content table {
+  max-width: 100%;
+  border-collapse: collapse;
+}
+
+#folio-content td,
+#folio-content th {
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+}
+
+#folio-content h1,
+#folio-content h2,
+#folio-content h3,
+#folio-content h4,
+#folio-content h5,
+#folio-content h6 {
+  break-after: avoid;
+  -webkit-column-break-after: avoid;
+  line-height: 1.25;
+}
+
+#folio-content p {
+  margin: 0 0 0.65em;
+}
+
+#folio-content ul,
+#folio-content ol {
+  margin: 0 0 0.65em;
+  padding-left: 1.4em;
+}
+
+#folio-content blockquote {
+  margin: 0 0 0.65em;
+  padding-left: 0.8em;
+  border-left: 3px solid rgba(128, 128, 128, 0.35);
+}
+
+.folio-chapter {
+  display: block;
+}
+
+/* Book mode: one column per screen, scrolled horizontally page by page. */
+body.folio-book #folio-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior: none;
+}
+
+body.folio-book #folio-content {
+  height: var(--folio-page-height);
+  width: var(--folio-page-width);
+  column-width: var(--folio-page-width);
+  column-gap: 0;
+  column-fill: auto;
+  min-height: 0;
+  padding: 0;
+}
+
+body.folio-book .folio-chapter {
+  height: 100%;
+}
+
+body.folio-book #folio-content * {
+  -webkit-column-break-inside: auto;
+}
+
+body.folio-book #folio-content img,
+body.folio-book #folio-content svg,
+body.folio-book #folio-content image,
+body.folio-book #folio-content table,
+body.folio-book #folio-content pre,
+body.folio-book #folio-content blockquote {
+  break-inside: avoid;
+  -webkit-column-break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+/* Hidden helper for "Page X of Y" measurements. */
+#folio-measure {
+  position: absolute;
+  visibility: hidden;
+  pointer-events: none;
+  height: 0;
+  width: 0;
+}

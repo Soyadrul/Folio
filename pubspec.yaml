@@ -13,8 +13,6 @@ dependencies:
 
   # ── EPUB rendering ──────────────────────────────────────────────────────────
   # Pure Flutter widgets (no WebView), works on Android AND Linux
-  epub_view: ^3.2.0
-
   # HTML rendering for EPUB content (used by epub_view, we use it directly for custom styling)
   flutter_html: ^3.0.0
 
@@ -23,8 +21,6 @@ dependencies:
 
   # Low-level epub parser used for metadata extraction (cover, title, author)
   # epub_view already depends on this; we declare it explicitly so we can use it
-  epubx: ^4.0.0
-
   # ── File / folder picking ───────────────────────────────────────────────────
   # Supports Android (SAF) and Linux (GTK file chooser / XDG portal)
   file_picker: ^10.3.10
@@ -45,6 +41,13 @@ dependencies:
   # ── Android runtime permissions ─────────────────────────────────────────────
   # Handles READ_EXTERNAL_STORAGE (Android < 13) and media permissions (≥ 13)
   permission_handler: ^12.0.1
+  archive: ^4.0.0
+  xml: ^6.6.1
+  # Pinned: flutter_html 3.0.0 uses `qs.matches`, removed in html 0.15.7.
+  html: 0.15.6
+  crypto: ^3.0.8
+  image: ^4.0.0
+  flutter_inappwebview: ^6.1.5
 
 dev_dependencies:
   flutter_test:
@@ -53,3 +56,6 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/reader/reader.css
+    - assets/reader/reader.js

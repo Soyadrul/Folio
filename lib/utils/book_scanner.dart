@@ -1,110 +1,79 @@
 import 'dart:io';
-import 'dart:typed_data';
+import 'dart:isolate';
 
-import 'package:epubx/epubx.dart';
 import 'package:path/path.dart' as p;
 
+import '../epub/epub_metadata.dart';
 import '../models/book.dart';
 
 /// Walks [folderPath] recursively and returns every .epub file it finds.
 ///
-/// Each file is parsed with [epubx] to extract the title, author, and cover
-/// image.  Parsing happens in a simple try/catch so a corrupt epub never
-/// prevents the rest of the library from loading.
+/// Parsing runs in a background isolate so a large library never blocks the
+/// interface. A broken book only loses its metadata; the others still load.
 Future<List<Book>> scanFolderForBooks(String folderPath) async {
   final dir = Directory(folderPath);
   if (!await dir.exists()) return [];
 
-  final epubFiles = await _collectEpubFiles(dir);
-  final books = <Book>[];
+  final paths = await _collectEpubFiles(dir);
+  if (paths.isEmpty) return [];
 
-  for (final file in epubFiles) {
-    try {
-      final book = await _parseEpub(file);
-      books.add(book);
-    } catch (_) {
-      // Use the filename as a fallback title if parsing fails.
-      books.add(Book(
-        path: file.path,
-        title: p.basenameWithoutExtension(file.path),
-        author: 'Unknown Author',
-      ));
-    }
+  List<Map<String, Object?>> metadata;
+  try {
+    metadata = await Isolate.run(() => _readAllMetadata(paths));
+  } on Object {
+    metadata = const [];
   }
 
-  // Sort alphabetically by title (case-insensitive).
+  final byPath = <String, Map<String, Object?>>{
+    for (final item in metadata)
+      if (item['path'] is String) item['path']! as String: item,
+  };
+
+  final books = paths.map((path) {
+    final item = byPath[path];
+    return Book(
+      path: path,
+      title: (item?['title'] as String?) ?? p.basenameWithoutExtension(path),
+      author: (item?['author'] as String?) ?? 'Unknown Author',
+    );
+  }).toList();
+
   books.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
   return books;
 }
 
-/// Recursively lists all *.epub files under [dir].
-Future<List<File>> _collectEpubFiles(Directory dir) async {
-  final results = <File>[];
-  await for (final entity in dir.list(recursive: true, followLinks: false)) {
-    if (entity is File && entity.path.toLowerCase().endsWith('.epub')) {
-      results.add(entity);
+Future<List<Map<String, Object?>>> _readAllMetadata(List<String> paths) async {
+  final result = <Map<String, Object?>>[];
+  for (final path in paths) {
+    try {
+      final metadata = await readEpubMetadata(path);
+      result.add({
+        'path': path,
+        'title': metadata.title,
+        'author': metadata.author,
+      });
+    } catch (_) {
+      result.add({
+        'path': path,
+        'title': p.basenameWithoutExtension(path),
+        'author': 'Unknown Author',
+      });
     }
+  }
+  return result;
+}
+
+/// Recursively lists all *.epub files under [dir].
+Future<List<String>> _collectEpubFiles(Directory dir) async {
+  final results = <String>[];
+  try {
+    await for (final entity in dir.list(recursive: true, followLinks: false)) {
+      if (entity is File && entity.path.toLowerCase().endsWith('.epub')) {
+        results.add(entity.path);
+      }
+    }
+  } on FileSystemException {
+    return results;
   }
   return results;
-}
-
-/// Reads one EPUB file and extracts its metadata.
-Future<Book> _parseEpub(File file) async {
-  final bytes = await file.readAsBytes();
-  final epub = await EpubReader.readBook(bytes);
-
-  final title = (epub.Title?.trim().isNotEmpty ?? false)
-      ? epub.Title!.trim()
-      : p.basenameWithoutExtension(file.path);
-
-  final author = (epub.Author?.trim().isNotEmpty ?? false)
-      ? epub.Author!.trim()
-      : 'Unknown Author';
-
-  // Try to extract the cover image.
-  Uint8List? cover;
-  try {
-    cover = _extractCover(epub);
-  } catch (_) {
-    cover = null;
-  }
-
-  return Book(
-    path: file.path,
-    title: title,
-    author: author,
-    coverImage: cover,
-  );
-}
-
-/// Attempts to find a cover image inside the parsed [EpubBook].
-///
-/// Tries several common locations where epub publishers place the cover art.
-Uint8List? _extractCover(EpubBook epub) {
-  // 1. Direct cover field - Image from image package, use getBytes().
-  final cover = epub.CoverImage;
-  if (cover != null) {
-    return cover.getBytes();
-  }
-
-  // 2. Look for an image named "cover" in the content files.
-  final images = epub.Content?.Images;
-  if (images == null) return null;
-
-  for (final entry in images.entries) {
-    final key = entry.key.toLowerCase();
-    if (key.contains('cover') && entry.value.Content != null) {
-      return Uint8List.fromList(entry.value.Content!);
-    }
-  }
-
-  // 3. Fall back to the very first image in the book.
-  if (images.isNotEmpty) {
-    final first = images.values.first;
-    if (first.Content != null) {
-      return Uint8List.fromList(first.Content!);
-    }
-  }
-
-  return null;
 }
