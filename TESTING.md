@@ -7,13 +7,14 @@ Run from the repository root:
 | Check | Command | Result |
 | --- | --- | --- |
 | Static analysis | `flutter analyze` | No issues |
-| Unit and widget tests | `flutter test` | 79 tests passing |
+| Unit and widget tests | `flutter test` | 80 tests passing |
 | Reader JavaScript syntax | `node --check assets/reader/reader.js` | OK |
 | Linux desktop build | `flutter build linux --release` | Built `build/linux/x64/release/bundle/folio` |
 
 The tests cover the EPUB parser and URL rewriting, the scanner and cover
 thumbnails, settings defaults/ranges/JSON, volume-key mapping, reading-position
-storage, and the Settings page groups.
+storage, the Settings page groups, and closing the reader (it must save the
+position without using `ref` during dispose).
 
 ## Android acceptance criteria
 

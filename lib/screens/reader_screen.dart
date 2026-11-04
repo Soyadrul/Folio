@@ -23,9 +23,13 @@ import 'settings_screen.dart';
 /// The reading screen. It owns the book chrome (title, TOC, progress) and
 /// mounts either the Android WebView or the Flutter fallback.
 class ReaderScreen extends ConsumerStatefulWidget {
-  const ReaderScreen({super.key, required this.book});
+  const ReaderScreen({super.key, required this.book, this.loader});
 
   final Book book;
+
+  /// Optional loader override; tests use it to keep the EPUB cache inside a
+  /// temporary directory.
+  final EpubLoader? loader;
 
   @override
   ConsumerState<ReaderScreen> createState() => _ReaderScreenState();
@@ -40,6 +44,11 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   EpubDocument? _document;
   String? _error;
   String? _runtimeError;
+  late final EpubLoader _loader;
+
+  /// Captured while the widget is alive so the last save in [dispose] does not
+  /// have to read `ref`, which Riverpod forbids once unmounting starts.
+  late final LibraryNotifier _library;
 
   int _chapterIndex = 0;
   double _chapterProgress = 0;
@@ -65,6 +74,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _loader = widget.loader ?? EpubLoader();
+    _library = ref.read(libraryProvider.notifier);
     _chapterIndex = widget.book.lastChapterIndex;
     _chapterProgress = widget.book.lastProgress;
     _fade = AnimationController(
@@ -154,7 +165,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
 
   Future<void> _openBook() async {
     try {
-      final document = await EpubLoader().load(widget.book.path);
+      final document = await _loader.load(widget.book.path);
       ReadingPosition? saved;
       try {
         saved = await _positions.load(widget.book.path);
@@ -231,13 +242,11 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     final now = DateTime.now().millisecondsSinceEpoch;
     if (!force && now - _lastSavedMs < 500) return;
     _lastSavedMs = now;
-    ref
-        .read(libraryProvider.notifier)
-        .updateReadingProgress(
-          widget.book.path,
-          _chapterIndex,
-          _chapterProgress,
-        );
+    _library.updateReadingProgress(
+      widget.book.path,
+      _chapterIndex,
+      _chapterProgress,
+    );
     unawaited(
       _positions
           .save(
