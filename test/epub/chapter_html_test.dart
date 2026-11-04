@@ -49,6 +49,13 @@ void main() {
       expect(c.bodyHtml, contains('href="https://example.com"'));
     });
 
+    test('keeps the chapter language for hyphenation', () {
+      final c = rewrite(
+        '<html lang="it-IT" xml:lang="it-IT"><body><p>ciao</p></body></html>',
+      );
+      expect(c.language, 'it-IT');
+    });
+
     test('collects head styles and separates the body', () {
       final c = rewrite(
         '<html><head><style>p{color:red}</style>'
@@ -130,10 +137,7 @@ void main() {
         '<body><p style="background-image:url(../images/other.png)">x</p>'
         '</body></html>',
       );
-      expect(
-        c.bodyHtml,
-        contains('file:///cache/book/OEBPS/images/other.png'),
-      );
+      expect(c.bodyHtml, contains('file:///cache/book/OEBPS/images/other.png'));
       expect(
         c.headHtml,
         contains('url("file:///cache/book/OEBPS/images/pic.jpg")'),

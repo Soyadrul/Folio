@@ -355,11 +355,16 @@ class EpubLoader {
     for (final itemref in _allElements(spine, 'itemref')) {
       final idref = _attribute(itemref, 'idref');
       if (idref == null) continue;
-      if ((_attribute(itemref, 'linear') ?? '').toLowerCase() == 'no') {
-        continue;
-      }
       final item = manifestItems[idref];
       if (item == null) continue;
+      // Auxiliary pages stay out of the reading flow, except the EPUB 3
+      // navigation document: it is the book's index page and readers expect
+      // to find it where the publisher placed it in the spine.
+      final isNavigation = item.properties.split(' ').contains('nav');
+      if (!isNavigation &&
+          (_attribute(itemref, 'linear') ?? '').toLowerCase() == 'no') {
+        continue;
+      }
       final resolved = resolver.resolve(item.href, basePath: opfRel);
       if (resolved.path == null) continue;
       final absolute = p.joinAll([cacheDir, ...resolved.path!.split('/')]);
@@ -456,7 +461,7 @@ class EpubLoader {
   }) async {
     final entries = <EpubTocEntry>[];
 
-    void add(String title, String href, String base) {
+    void add(String title, String href, String base, {int level = 0}) {
       final resolved = resolver.resolve(href, basePath: base);
       if (resolved.path == null) return;
       final index = chapters
@@ -469,7 +474,7 @@ class EpubLoader {
           title: title.trim(),
           chapterIndex: index,
           fragment: resolved.fragment,
-          level: 0,
+          level: level,
         ),
       );
     }
@@ -494,7 +499,13 @@ class EpubLoader {
             for (final anchor in scope.querySelectorAll('a')) {
               final href = anchor.attributes['href'];
               if (href == null) continue;
-              add(anchor.text, href, navBase);
+              var level = 0;
+              var parent = anchor.parent;
+              while (parent != null && parent != scope) {
+                if (parent.localName?.toLowerCase() == 'ol') level++;
+                parent = parent.parent;
+              }
+              add(anchor.text, href, navBase, level: level > 0 ? level - 1 : 0);
             }
           }
         }

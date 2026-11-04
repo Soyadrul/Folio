@@ -9,6 +9,7 @@ import 'package:path/path.dart' as p;
 
 import '../epub/chapter_html.dart';
 import '../epub/epub.dart';
+import '../epub/href_resolver.dart';
 import '../models/app_settings.dart';
 import '../utils/theme_utils.dart';
 import 'reader_content_controller.dart';
@@ -280,6 +281,7 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
       'head': content.headHtml,
       'bodyClass': content.bodyClass,
       'bodyStyle': content.bodyStyle,
+      'language': content.language,
       'hasPrev': index > 0,
       'hasNext': index < widget.document.chapters.length - 1,
       'progress': progress,
@@ -369,19 +371,16 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
       debugPrint('Folio: ignoring external link $href');
       return;
     }
-    if (uri.scheme != 'file') return;
+    final link = parseFileLink(href);
+    if (link == null) return;
     final chapter = widget.document.chapters
-        .where((c) => p.equals(c.path, uri.toFilePath()))
+        .where((c) => p.equals(c.path, link.path))
         .firstOrNull;
     if (chapter == null) {
       widget.callbacks.onError?.call('This link points outside the book.');
       return;
     }
-    await loadChapter(
-      chapter.index,
-      progress: 0,
-      element: uri.fragment.isEmpty ? null : uri.fragment,
-    );
+    await loadChapter(chapter.index, progress: 0, element: link.fragment);
   }
 
   Future<void> _handleMessage(List<dynamic> arguments) async {

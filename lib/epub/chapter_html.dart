@@ -12,6 +12,7 @@ class ChapterContent {
     required this.missingResources,
     this.bodyClass,
     this.bodyStyle,
+    this.language,
   });
 
   /// Inner HTML of the chapter's `<body>`.
@@ -25,6 +26,9 @@ class ChapterContent {
 
   final String? bodyClass;
   final String? bodyStyle;
+
+  /// `lang`/`xml:lang` of the chapter, used for hyphenation.
+  final String? language;
 }
 
 /// Rewrites a chapter so a WebView can load it from the extraction folder.
@@ -174,12 +178,15 @@ ChapterContent rewriteChapterHtml(
     }
   }
 
+  final language = _chapterLanguage(document, body);
+
   return ChapterContent(
     bodyHtml: body.innerHtml,
     headHtml: headParts.join('\n'),
     missingResources: missing,
     bodyClass: body.attributes['class'],
     bodyStyle: body.attributes['style'],
+    language: language,
   );
 }
 
@@ -188,6 +195,20 @@ String _attributeName(Object key) {
     return key.prefix == null ? key.name : '${key.prefix}:${key.name}';
   }
   return key.toString();
+}
+
+/// Reads `lang`/`xml:lang` from the document, falling back to the body.
+String? _chapterLanguage(Document document, Element body) {
+  for (final element in [document.documentElement, body]) {
+    if (element == null) continue;
+    for (final key in element.attributes.keys) {
+      final name = _attributeName(key).toLowerCase();
+      if (name != 'lang' && name != 'xml:lang') continue;
+      final value = element.attributes[key]?.trim();
+      if (value != null && value.isNotEmpty) return value;
+    }
+  }
+  return null;
 }
 
 String _rewriteCssUrls(

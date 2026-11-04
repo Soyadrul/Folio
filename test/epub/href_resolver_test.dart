@@ -118,4 +118,26 @@ void main() {
       expect(uri, 'file:///tmp/a%20b/c%23d.xhtml');
     });
   });
+
+  group('parseFileLink', () {
+    test('splits and decodes the anchor of a file URI', () {
+      final link = parseFileLink(
+        'file:///tmp/Book%20One/ch%201.xhtml#caf%C3%A9',
+      );
+      expect(link, isNotNull);
+      expect(link!.path, '/tmp/Book One/ch 1.xhtml');
+      expect(link.fragment, 'café');
+    });
+
+    test('returns no fragment when the URI has no anchor', () {
+      final link = parseFileLink('file:///tmp/book/ch1.xhtml');
+      expect(link!.path, '/tmp/book/ch1.xhtml');
+      expect(link.fragment, isNull);
+    });
+
+    test('ignores non-file links', () {
+      expect(parseFileLink('https://example.com/a#b'), isNull);
+      expect(parseFileLink('mailto:me@example.com'), isNull);
+    });
+  });
 }

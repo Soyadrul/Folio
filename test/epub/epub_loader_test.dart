@@ -102,6 +102,47 @@ void main() {
       expect(book.toc[1].fragment, 'sec');
     });
 
+    test(
+      'includes the navigation document even when it is not linear',
+      () async {
+        final opf = epub3Opf.replaceFirst(
+          '<itemref idref="ch1"/>',
+          '<itemref idref="nav" linear="no"/>\n    <itemref idref="ch1"/>',
+        );
+        final file = await EpubFixture.write(tmp, epub3Entries(opf: opf));
+        final book = await loader().load(file.path);
+
+        expect(book.chapters.map((c) => c.href), [
+          'nav.xhtml',
+          'text/ch1.xhtml',
+          'text/ch2.xhtml',
+        ]);
+        expect(book.toc[0].chapterIndex, 1);
+        expect(book.toc[1].chapterIndex, 2);
+      },
+    );
+
+    test('keeps TOC nesting from the nav document', () async {
+      const nav = '''
+<html xmlns="http://www.w3.org/1999/xhtml"
+      xmlns:epub="http://www.idpf.org/2007/ops">
+<body>
+  <nav epub:type="toc"><ol>
+    <li><a href="text/ch1.xhtml">Part one</a>
+      <ol><li><a href="text/ch2.xhtml#sec">Section</a></li></ol>
+    </li>
+  </ol></nav>
+</body>
+</html>
+''';
+      final entries = epub3Entries()..['OEBPS/nav.xhtml'] = nav;
+      final file = await EpubFixture.write(tmp, entries);
+      final book = await loader().load(file.path);
+
+      expect(book.toc.map((t) => t.title), ['Part one', 'Section']);
+      expect(book.toc.map((t) => t.level), [0, 1]);
+    });
+
     test('supports URL-encoded manifest hrefs', () async {
       final opf = epub3Opf.replaceFirst(
         '<item id="cover" href="images/cover.png" media-type="image/png"',

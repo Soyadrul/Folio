@@ -138,11 +138,111 @@ body {
 #folio-content h6 {
   break-after: avoid;
   -webkit-column-break-after: avoid;
-  line-height: 1.25;
+  line-height: 1.2;
+  font-weight: 700;
+  text-wrap: balance;
+}
+
+/* A predictable hierarchy: many EPUBs carry tiny heading styles meant for a
+   different viewport, so the reader imposes its own scale. */
+#folio-content h1 {
+  font-size: 2em;
+  margin: 0.2em 0 0.8em;
+}
+
+#folio-content h2 {
+  font-size: 1.5em;
+  margin: 1.2em 0 0.5em;
+}
+
+#folio-content h3 {
+  font-size: 1.3em;
+  margin: 1em 0 0.4em;
+}
+
+#folio-content h4 {
+  font-size: 1.15em;
+  font-weight: 600;
+  margin: 0.9em 0 0.35em;
+}
+
+#folio-content h5,
+#folio-content h6 {
+  font-size: 1em;
+  margin: 0.8em 0 0.3em;
+}
+
+/* Hyphenation follows the reader setting rather than whatever the book
+   declares. The chapter language (set on the section) chooses the dictionary. */
+#folio-content p,
+#folio-content li,
+#folio-content figcaption,
+#folio-content blockquote {
+  hyphens: var(--folio-hyphens);
+  -webkit-hyphens: var(--folio-hyphens);
+}
+
+#folio-content .nohyphens,
+#folio-content h1,
+#folio-content h2,
+#folio-content h3,
+#folio-content h4,
+#folio-content h5,
+#folio-content h6 {
+  hyphens: none;
+  -webkit-hyphens: none;
 }
 
 #folio-content p {
   margin: 0 0 0.65em;
+}
+
+/* Running text: indent each paragraph and drop the blank line between
+   paragraphs, as in a printed book. */
+#folio-content .main > p,
+#folio-content .folio-chapter > p,
+#folio-content section > p {
+  margin: 0;
+  text-indent: 1.5em;
+}
+
+/* Structural paragraphs keep their own alignment instead of being indented. */
+#folio-content
+  :is(.main, .folio-chapter, section)
+  > p:is(.center, .right, .left, .noindent, .divider, .divider-2, .signature) {
+  text-indent: 0;
+}
+
+#folio-content :is(.main, .folio-chapter, section) > p.new-part {
+  margin-top: 1.2em;
+}
+
+#folio-content :is(.main, .folio-chapter, section) > p.new-part-2 {
+  margin-top: 2.4em;
+}
+
+#folio-content
+  :is(.main, .folio-chapter, section)
+  > p:is(.divider, .divider-2) {
+  margin: 1.2em 0;
+  text-align: center;
+}
+
+/* The publisher's index page is a <nav> of nested lists; render it as a
+   clean contents list rather than a bulleted outline. */
+#folio-content nav ol {
+  list-style: none;
+  padding-left: 0;
+  margin: 0;
+}
+
+#folio-content nav ol ol {
+  padding-left: 1.2em;
+}
+
+#folio-content nav li {
+  margin: 0.35em 0;
+  text-indent: 0;
 }
 
 #folio-content ul,

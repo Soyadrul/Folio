@@ -328,6 +328,7 @@
     el.setAttribute('data-folio-index', String(payload.index));
     if (payload.bodyClass) el.className += ' ' + payload.bodyClass;
     if (payload.bodyStyle) el.setAttribute('style', payload.bodyStyle);
+    if (payload.language) el.setAttribute('lang', payload.language);
     el.innerHTML = payload.html;
     return el;
   }
@@ -611,7 +612,13 @@
     const href = anchor.getAttribute('href');
     if (!href) return;
     if (href.charAt(0) === '#') {
-      const target = document.getElementById(href.substring(1));
+      let id = href.substring(1);
+      try {
+        id = decodeURIComponent(id);
+      } catch (e) {
+        /* Keep the raw id for malformed escapes. */
+      }
+      const target = document.getElementById(id);
       if (target) {
         event.preventDefault();
         target.scrollIntoView({ block: 'start', behavior: 'auto' });

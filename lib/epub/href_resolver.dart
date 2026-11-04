@@ -30,6 +30,37 @@ class ResolvedHref {
   final bool isMissing;
 }
 
+/// A resolved `file:` link with its optional anchor.
+class LocalLink {
+  const LocalLink({required this.path, this.fragment});
+
+  /// Absolute native path, percent-decoded.
+  final String path;
+
+  /// Decoded `#fragment`, or null when the link has no anchor.
+  final String? fragment;
+}
+
+/// Splits a `file:` URI into a native path and a decoded anchor.
+///
+/// Returns null for links that do not point at a local file. `Uri.toFilePath`
+/// rejects URIs that still carry a fragment, so the fragment must be removed
+/// before the path is extracted.
+LocalLink? parseFileLink(String href) {
+  final uri = Uri.tryParse(href);
+  if (uri == null || uri.scheme != 'file') return null;
+  try {
+    final path = uri.replace(fragment: '').toFilePath();
+    final raw = uri.hasFragment ? uri.fragment : '';
+    final fragment = raw.isEmpty ? null : Uri.decodeComponent(raw);
+    return LocalLink(path: path, fragment: fragment);
+  } on UnsupportedError {
+    return null;
+  } on FormatException {
+    return null;
+  }
+}
+
 /// Resolves EPUB links against the document that contains them.
 ///
 /// EPUB hrefs are relative to the containing file (a chapter, the OPF, the
