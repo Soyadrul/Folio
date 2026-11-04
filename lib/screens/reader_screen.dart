@@ -13,6 +13,7 @@ import '../providers/library_provider.dart';
 import '../providers/settings_provider.dart';
 import '../reader/flutter_reader.dart';
 import '../reader/reader_content_controller.dart';
+import '../reader/volume_keys.dart';
 import '../reader/webview_reader.dart';
 import '../utils/theme_utils.dart';
 import 'settings_screen.dart';
@@ -50,6 +51,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
 
   bool _autoRunning = false;
   int _autoSpeed = 40;
+  bool _volumeKeysEnabled = false;
 
   Timer? _saveTimer;
   int _lastSavedMs = 0;
@@ -69,6 +71,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     _fadeAnimation = CurvedAnimation(parent: _fade, curve: Curves.easeOut);
     _fade.value = 1;
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    VolumeKeys.setHandler(_onVolumeKey);
+    _syncVolumeKeys(ref.read(settingsNotifierProvider));
     _openBook();
   }
 
@@ -77,6 +81,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     WidgetsBinding.instance.removeObserver(this);
     _saveTimer?.cancel();
     _persistPosition(force: true);
+    VolumeKeys.setHandler(null);
+    if (_volumeKeysEnabled) VolumeKeys.setEnabled(false);
     _fade.dispose();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     super.dispose();
@@ -91,6 +97,52 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     }
   }
 
+  // ── Hardware volume keys ──────────────────────────────────────────────────
+
+  void _syncVolumeKeys(AppSettings settings) {
+    final wanted =
+        _document != null &&
+        (settings.readerMode == ReaderMode.book
+            ? settings.volumeButtonsTurnPages
+            : settings.volumeButtonsChangeSpeed);
+    if (wanted == _volumeKeysEnabled) return;
+    _volumeKeysEnabled = wanted;
+    VolumeKeys.setEnabled(wanted);
+  }
+
+  void _onVolumeKey(VolumeKey key) {
+    final settings = ref.read(settingsNotifierProvider);
+    if (settings.readerMode == ReaderMode.book) {
+      if (!settings.volumeButtonsTurnPages) return;
+      // Volume up is "previous" by default; invert swaps the two.
+      if (volumeKeyTurnsForward(
+        key: key,
+        invert: settings.invertVolumeButtons,
+      )) {
+        _content.nextPage();
+      } else {
+        _content.prevPage();
+      }
+      return;
+    }
+
+    if (!settings.volumeButtonsChangeSpeed) return;
+    final nextSpeed = scrollSpeedAfterVolumeKey(settings.autoScrollSpeed, key);
+    if (nextSpeed == settings.autoScrollSpeed) return;
+    ref
+        .read(settingsNotifierProvider.notifier)
+        .update((s) => s.copyWith(autoScrollSpeed: nextSpeed));
+    _content.setAutoScrollSpeed(nextSpeed.round());
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text('Scroll speed ${nextSpeed.round()} px/s'),
+          duration: const Duration(milliseconds: 700),
+        ),
+      );
+  }
+
   Future<void> _openBook() async {
     try {
       final document = await EpubLoader().load(widget.book.path);
@@ -101,6 +153,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
         _chapterIndex = index;
         _totalChapters = document.chapters.length;
       });
+      _syncVolumeKeys(ref.read(settingsNotifierProvider));
     } on EpubException catch (e) {
       if (!mounted) return;
       setState(() => _error = e.message);
@@ -121,11 +174,12 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     }
   }
 
-  void _openSettings() {
+  Future<void> _openSettings() async {
     _content.pauseAutoScroll();
-    Navigator.of(
+    await Navigator.of(
       context,
     ).push(MaterialPageRoute(builder: (_) => const SettingsScreen()));
+    if (mounted) _syncVolumeKeys(ref.read(settingsNotifierProvider));
   }
 
   void _onProgress(ReaderProgressEvent event) {
@@ -186,6 +240,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   @override
   Widget build(BuildContext context) {
     final settings = ref.watch(settingsNotifierProvider);
+    ref.listen<AppSettings>(settingsNotifierProvider, (_, next) {
+      _syncVolumeKeys(next);
+    });
     final brightness = MediaQuery.of(context).platformBrightness;
     final background = readerBackground(settings.readingMode, brightness);
     final foreground = readerTextColor(settings.readingMode, brightness);

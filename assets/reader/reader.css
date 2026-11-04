@@ -166,6 +166,8 @@ body.folio-book #folio-scroll {
   overflow-x: auto;
   overflow-y: hidden;
   overscroll-behavior: none;
+  /* Page turns are handled by folio's swipe gesture, not native panning. */
+  touch-action: pan-y;
 }
 
 body.folio-book #folio-content {
@@ -178,8 +180,10 @@ body.folio-book #folio-content {
   padding: 0;
 }
 
+/* The chapter must fragment across columns, so it keeps an automatic height;
+   a fixed height would make it overflow one column instead of paginating. */
 body.folio-book .folio-chapter {
-  height: 100%;
+  height: auto;
 }
 
 body.folio-book #folio-content * {
@@ -189,6 +193,7 @@ body.folio-book #folio-content * {
 body.folio-book #folio-content img,
 body.folio-book #folio-content svg,
 body.folio-book #folio-content image,
+body.folio-book #folio-content figure,
 body.folio-book #folio-content table,
 body.folio-book #folio-content pre,
 body.folio-book #folio-content blockquote {

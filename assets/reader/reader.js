@@ -65,6 +65,11 @@
     return state.settings.mode === 'book';
   }
 
+  // Book pages are stored zero-based internally; the chrome shows 1-based.
+  function displayPage() {
+    return isBook() ? state.page + 1 : state.page;
+  }
+
   function viewportSize() {
     const el = scroller();
     return {
@@ -121,7 +126,7 @@
     const el = currentSection();
     if (!el) return 0;
     if (isBook()) {
-      return state.pages > 1 ? state.page / state.pages : 0;
+      return state.pages > 1 ? state.page / (state.pages - 1) : 0;
     }
     const size = viewportSize();
     const top = el.offsetTop;
@@ -148,7 +153,7 @@
     post('progress', {
       chapterIndex: state.index,
       progress: chapterProgress(),
-      page: state.page,
+      page: displayPage(),
       pages: state.pages,
       element: visibleElementId(),
     });
@@ -176,7 +181,7 @@
     }
     post('pages', {
       chapterIndex: state.index,
-      page: state.page,
+      page: displayPage(),
       pages: state.pages,
     });
     reportProgress(true);
@@ -206,7 +211,7 @@
     state.page = page;
     post('pages', {
       chapterIndex: state.index,
-      page: state.page,
+      page: displayPage(),
       pages: state.pages,
     });
     reportProgress(true);
@@ -244,7 +249,7 @@
       const target = document.getElementById(element);
       if (target) {
         target.scrollIntoView({ block: 'start', behavior: 'auto' });
-        reportProgress(true);
+        computeLayout();
         return;
       }
     }
@@ -268,7 +273,7 @@
     state.hasPrev = false;
     state.hasNext = false;
     state.section = null;
-    state.page = 1;
+    state.page = isBook() ? 0 : 1;
     state.pages = 1;
   }
 
@@ -356,7 +361,9 @@
     if (!isBook()) {
       scroller().scrollLeft = 0;
     }
-    relayout(30);
+    // Compute immediately so a caller that restores progress right after this
+    // call sees the new page count rather than the old one.
+    computeLayout();
     if (previousMode !== state.settings.mode) {
       post('modeChanged', { mode: state.settings.mode });
     }
@@ -490,7 +497,7 @@
         state.page = page;
         post('pages', {
           chapterIndex: state.index,
-          page: page,
+          page: displayPage(),
           pages: state.pages,
         });
       }
@@ -600,7 +607,7 @@
       return {
         mode: state.settings.mode,
         index: state.index,
-        page: state.page,
+        page: displayPage(),
         pages: state.pages,
         running: state.auto.running,
         speed: state.auto.speed,

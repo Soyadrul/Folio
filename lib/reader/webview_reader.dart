@@ -88,6 +88,9 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
   bool _loadingChapter = false;
   int _currentChapter = 0;
   int _requestedChapter = -1;
+  int? _pendingChapter;
+  double _pendingProgress = 0;
+  String? _pendingElement;
   double _lastProgress = 0;
   String? _lastElement;
   bool _autoScrollRunning = false;
@@ -130,20 +133,24 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
         oldWidget.settings.readingMode != widget.settings.readingMode;
 
     if (modeChanged || typographyChanged) {
-      _applySettingsToPage();
-      if (modeChanged) {
-        // Multi-column and scrolling layouts need a fresh chapter document.
-        _loadChapter(
-          _currentChapter,
-          progress: _lastProgress,
-          element: _lastElement,
-        );
-      } else {
-        _goToProgress(_lastProgress, _lastElement);
-      }
+      unawaited(_applySettingsAndRestore(modeChanged));
     } else if (oldWidget.settings.autoScrollSpeed !=
         widget.settings.autoScrollSpeed) {
       setAutoScrollSpeed(widget.settings.autoScrollSpeed.round());
+    }
+  }
+
+  Future<void> _applySettingsAndRestore(bool modeChanged) async {
+    await _applySettingsToPage();
+    if (modeChanged) {
+      // Multi-column and scrolling layouts need a fresh chapter document.
+      await _loadChapter(
+        _currentChapter,
+        progress: _lastProgress,
+        element: _lastElement,
+      );
+    } else {
+      await _goToProgress(_lastProgress, _lastElement);
     }
   }
 
@@ -284,11 +291,24 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
     String? element,
   }) async {
     if (index < 0 || index >= widget.document.chapters.length) return;
-    if (_loadingChapter) return;
+    if (_loadingChapter) {
+      // A fast page-turn or volume press arrived while the previous chapter
+      // was still loading; run it as soon as the current one is installed.
+      _pendingChapter = index;
+      _pendingProgress = progress;
+      _pendingElement = element;
+      return;
+    }
     _loadingChapter = true;
     _requestedChapter = index;
     try {
-      final content = await _contentFor(index);
+      final ChapterContent? content;
+      try {
+        content = await _contentFor(index);
+      } catch (e) {
+        widget.callbacks.onError?.call('Could not load this chapter: $e');
+        return;
+      }
       if (content == null) return;
       _currentChapter = index;
       _lastProgress = progress;
@@ -310,6 +330,21 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
       unawaited(_contentFor(index + 1));
     } finally {
       _loadingChapter = false;
+      final pending = _pendingChapter;
+      if (pending != null) {
+        _pendingChapter = null;
+        final pendingProgress = _pendingProgress;
+        final pendingElement = _pendingElement;
+        _pendingProgress = 0;
+        _pendingElement = null;
+        unawaited(
+          _loadChapter(
+            pending,
+            progress: pendingProgress,
+            element: pendingElement,
+          ),
+        );
+      }
     }
   }
 
@@ -372,10 +407,18 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
         );
         break;
       case 'atEnd':
-        await _loadChapter(_currentChapter + 1, progress: 0);
+        if (_currentChapter + 1 >= widget.document.chapters.length) {
+          widget.callbacks.onBoundary?.call(1);
+        } else {
+          await _loadChapter(_currentChapter + 1, progress: 0);
+        }
         break;
       case 'atStart':
-        await _loadChapter(_currentChapter - 1, progress: 1);
+        if (_currentChapter - 1 < 0) {
+          widget.callbacks.onBoundary?.call(-1);
+        } else {
+          await _loadChapter(_currentChapter - 1, progress: 1);
+        }
         break;
       case 'needChapter':
         await _appendOrPrepend(

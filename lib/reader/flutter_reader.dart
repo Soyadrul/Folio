@@ -49,6 +49,7 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
   int _autoSpeed = 40;
   double _autoPosition = 0;
   bool _restoring = false;
+  bool _loading = false;
   int _chapterIndex = 0;
 
   @override
@@ -76,9 +77,21 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
 
   Future<void> _load(int index, {double progress = 0, String? element}) async {
     if (index < 0 || index >= widget.document.chapters.length) return;
+    if (_loading) return;
+    _loading = true;
     final chapter = widget.document.chapters[index];
-    final content = await widget.document.loadChapterContent(chapter);
-    if (!mounted) return;
+    final ChapterContent content;
+    try {
+      content = await widget.document.loadChapterContent(chapter);
+    } catch (e) {
+      _loading = false;
+      widget.callbacks.onError?.call('Could not load this chapter: $e');
+      return;
+    }
+    if (!mounted) {
+      _loading = false;
+      return;
+    }
     for (final missing in content.missingResources) {
       debugPrint('Folio: missing resource in ${chapter.href}: $missing');
     }
@@ -90,6 +103,7 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_scroll.hasClients) {
         _restoring = false;
+        _loading = false;
         return;
       }
       _scroll.jumpTo(0);
@@ -101,6 +115,7 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
         // fallback. The WebView path handles element-level restoration.
       }
       _restoring = false;
+      _loading = false;
       _report(force: true);
       if (widget.settings.scrollAutoStart) startAutoScroll();
     });
@@ -136,13 +151,11 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
         pages: pages,
       ),
     );
-    if (widget.settings.readerMode == ReaderMode.scroll) {
-      final nextChapter = _chapterIndex + 1;
-      if (_chapterIndex < widget.document.chapters.length - 1 &&
-          _scroll.position.pixels >=
-              _scroll.position.maxScrollExtent - viewport * 0.2) {
-        _load(nextChapter);
-      }
+    final nextChapter = _chapterIndex + 1;
+    if (_chapterIndex < widget.document.chapters.length - 1 &&
+        _scroll.position.pixels >=
+            _scroll.position.maxScrollExtent - viewport * 0.2) {
+      _load(nextChapter);
     }
   }
 
@@ -171,10 +184,19 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
   @override
   Future<void> nextPage() async {
     if (!_scroll.hasClients) return;
-    final viewport = _scroll.position.viewportDimension;
-    final target = (_scroll.position.pixels + viewport * 0.92).clamp(
+    final position = _scroll.position;
+    if (position.pixels >= position.maxScrollExtent - 1) {
+      if (_chapterIndex + 1 < widget.document.chapters.length) {
+        await _load(_chapterIndex + 1);
+      } else {
+        widget.callbacks.onBoundary?.call(1);
+      }
+      return;
+    }
+    final viewport = position.viewportDimension;
+    final target = (position.pixels + viewport * 0.92).clamp(
       0.0,
-      _scroll.position.maxScrollExtent,
+      position.maxScrollExtent,
     );
     await _scroll.animateTo(
       target,
@@ -186,10 +208,19 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
   @override
   Future<void> prevPage() async {
     if (!_scroll.hasClients) return;
-    final viewport = _scroll.position.viewportDimension;
-    final target = (_scroll.position.pixels - viewport * 0.92).clamp(
+    final position = _scroll.position;
+    if (position.pixels <= 1) {
+      if (_chapterIndex > 0) {
+        await _load(_chapterIndex - 1, progress: 1);
+      } else {
+        widget.callbacks.onBoundary?.call(-1);
+      }
+      return;
+    }
+    final viewport = position.viewportDimension;
+    final target = (position.pixels - viewport * 0.92).clamp(
       0.0,
-      _scroll.position.maxScrollExtent,
+      position.maxScrollExtent,
     );
     await _scroll.animateTo(
       target,
