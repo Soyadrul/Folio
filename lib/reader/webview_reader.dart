@@ -398,6 +398,10 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
         );
         _lastProgress = event.progress;
         _lastElement = event.element;
+        // In scroll mode chapters are appended in place, so the visible
+        // chapter is only known from the JS progress event. Keeping this in
+        // sync lets the next `needChapter` request ask for the right chapter.
+        _currentChapter = event.chapterIndex;
         widget.callbacks.onProgress?.call(event);
         break;
       case 'pages':

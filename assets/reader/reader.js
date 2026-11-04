@@ -33,6 +33,7 @@
       last: 0,
       pos: 0,
       raf: 0,
+      started: false,
     },
     touch: null,
     lastReport: 0,
@@ -116,10 +117,22 @@
   }
 
   function currentSection() {
-    if (state.section && document.body.contains(state.section)) {
-      return state.section;
+    const list = sections();
+    if (list.length === 0) return null;
+    if (isBook()) {
+      return state.section && document.body.contains(state.section)
+        ? state.section
+        : list[0];
     }
-    return sectionFor(state.index) || sections()[0] || null;
+    // Chapters are appended in scroll mode, so the visible section must be
+    // derived from the scroll position rather than the last loaded one.
+    const probe = scroller().scrollTop + viewportSize().height * 0.33;
+    let current = list[0];
+    for (const el of list) {
+      if (el.offsetTop <= probe) current = el;
+      else break;
+    }
+    return current;
   }
 
   function chapterProgress() {
@@ -137,7 +150,7 @@
   function visibleElementId() {
     const size = viewportSize();
     const x = Math.floor(size.width / 2);
-    const y = 2;
+    const y = Math.max(2, Math.floor(size.height * 0.15));
     let el = document.elementFromPoint(x, y);
     while (el && el !== document.body) {
       if (el.id) return el.id;
@@ -159,8 +172,30 @@
     });
   }
 
+  function trimSections() {
+    if (isBook()) return;
+    const list = sections();
+    if (list.length <= 3) return;
+    const keepFrom = state.index - 1;
+    const keepTo = state.index + 1;
+    for (const el of list) {
+      const index = Number(el.getAttribute('data-folio-index'));
+      if (index >= keepFrom && index <= keepTo) continue;
+      const top = el.offsetTop;
+      const height = el.offsetHeight;
+      el.remove();
+      // Removing content above the reader shifts everything up; compensate so
+      // the visible text does not jump. Content below needs no adjustment.
+      if (top + height <= scroller().scrollTop) {
+        scroller().scrollTop -= height;
+        if (state.auto.running) state.auto.pos -= height;
+      }
+    }
+  }
+
   function computeLayout() {
     if (!content()) return;
+    if (!isBook()) trimSections();
     const size = viewportSize();
     applyCssVariables();
     if (isBook()) {
@@ -185,6 +220,16 @@
       pages: state.pages,
     });
     reportProgress(true);
+
+    // A short chapter may never scroll, so the scroll handler cannot request
+    // the next one. Ask as soon as the remaining content is under two screens.
+    if (!isBook() && state.hasNext && !sectionFor(state.index + 1)) {
+      const remaining =
+        scroller().scrollHeight - scroller().clientHeight - scroller().scrollTop;
+      if (remaining < size.height * 2) {
+        post('needChapter', { direction: 1, chapterIndex: state.index });
+      }
+    }
   }
 
   let layoutTimer = 0;
@@ -291,8 +336,17 @@
     head().innerHTML = payload.head || '';
   }
 
+  function mergeHead(payload) {
+    if (!payload.head) return;
+    const current = head().innerHTML;
+    if (current.indexOf(payload.head) === -1) {
+      head().innerHTML = current + '\n' + payload.head;
+    }
+  }
+
   function setChapter(payload) {
     state.pending = null;
+    if (state.auto.running) pauseAutoScroll();
     clearContent();
     applyHead(payload);
     const el = makeSection(payload);
@@ -312,7 +366,11 @@
         if (payload.progress || payload.element) {
           goToProgress(payload.progress || 0, payload.element);
         }
-        if (state.settings.autoStart && !isBook()) {
+        if (
+          state.settings.autoStart &&
+          !isBook() &&
+          !state.auto.started
+        ) {
           startAutoScroll();
         }
         post('chapterReady', { chapterIndex: payload.index });
@@ -324,15 +382,13 @@
     if (sectionFor(payload.index)) return;
     const el = makeSection(payload);
     content().appendChild(el);
+    mergeHead(payload);
     state.loadedEnd = payload.index;
     state.hasNext = !!payload.hasNext;
-    if (isBook()) {
-      relayout(60);
-    } else {
-      // If auto-scroll is running, let it continue into the new content.
-      if (state.auto.running) state.auto.pos = scroller().scrollTop;
-      post('chapterAppended', { chapterIndex: payload.index });
-    }
+    // If auto-scroll is running, let it continue into the new content.
+    if (state.auto.running) state.auto.pos = scroller().scrollTop;
+    post('chapterAppended', { chapterIndex: payload.index });
+    relayout(60);
   }
 
   function prependChapter(payload) {
@@ -341,14 +397,15 @@
     const current = content().firstElementChild;
     const before = scroller().scrollHeight;
     content().insertBefore(el, current);
+    mergeHead(payload);
     state.loadedStart = payload.index;
     state.hasPrev = !!payload.hasPrev;
     if (!isBook()) {
       const delta = scroller().scrollHeight - before;
       scroller().scrollTop += delta;
       if (state.auto.running) state.auto.pos += delta;
-      post('chapterPrepended', { chapterIndex: payload.index });
     }
+    post('chapterPrepended', { chapterIndex: payload.index });
     relayout(60);
   }
 
@@ -358,7 +415,9 @@
     state.auto.speed = Number(state.settings.scrollSpeed) || 40;
     setModeClass();
     applyCssVariables();
-    if (!isBook()) {
+    if (isBook()) {
+      pauseAutoScroll();
+    } else {
       scroller().scrollLeft = 0;
     }
     // Compute immediately so a caller that restores progress right after this
@@ -374,6 +433,7 @@
   function startAutoScroll() {
     if (isBook() || state.auto.running) return;
     state.auto.running = true;
+    state.auto.started = true;
     state.auto.pos = scroller().scrollTop;
     state.auto.last = performance.now();
     const step = function (now) {
@@ -385,6 +445,10 @@
       if (state.auto.pos >= max) {
         state.auto.pos = max;
         scroller().scrollTop = max;
+        if (!state.hasNext) {
+          pauseAutoScroll();
+          return;
+        }
         state.auto.raf = requestAnimationFrame(step);
         return;
       }
@@ -429,9 +493,17 @@
       moved: false,
       onLink: !!event.target.closest('a'),
     };
-    if (state.auto.running) {
-      // Manual dragging pauses automatic scrolling.
-      pauseAutoScroll();
+  }
+
+  function onPointerMove(event) {
+    const touch = state.touch;
+    if (!touch || touch.moved) return;
+    const dx = event.clientX - touch.x;
+    const dy = event.clientY - touch.y;
+    if (Math.sqrt(dx * dx + dy * dy) > 12) {
+      touch.moved = true;
+      // A real drag/scroll is manual input, so automatic scrolling pauses.
+      if (state.auto.running) pauseAutoScroll();
     }
   }
 
@@ -516,10 +588,18 @@
     }
     const size = viewportSize();
     const max = scroller().scrollHeight - scroller().clientHeight;
-    if (state.hasNext && scroller().scrollTop + size.height * 1.2 >= max) {
+    if (
+      state.hasNext &&
+      !sectionFor(state.index + 1) &&
+      scroller().scrollTop + size.height * 2.5 >= max
+    ) {
       post('needChapter', { direction: 1, chapterIndex: state.index });
     }
-    if (state.hasPrev && scroller().scrollTop < size.height * 0.5) {
+    if (
+      state.hasPrev &&
+      !sectionFor(state.index - 1) &&
+      scroller().scrollTop < size.height * 1.2
+    ) {
       post('needChapter', { direction: -1, chapterIndex: state.index });
     }
     reportProgress(false);
@@ -616,6 +696,7 @@
   };
 
   document.addEventListener('pointerdown', onPointerDown, { passive: true });
+  document.addEventListener('pointermove', onPointerMove, { passive: true });
   document.addEventListener('pointerup', onPointerUp, { passive: true });
   document.addEventListener('click', onLinkClick, true);
   document.addEventListener('error', onImageError, true);
