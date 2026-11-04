@@ -11,8 +11,10 @@ bool volumeKeyTurnsForward({required VolumeKey key, required bool invert}) =>
     invert ? key == VolumeKey.up : key == VolumeKey.down;
 
 /// Volume up makes automatic scrolling faster, within the supported range.
+///
+/// Section 7 of the specification asks for steps of 5 pixels per second.
 double scrollSpeedAfterVolumeKey(double current, VolumeKey key) {
-  final next = current + (key == VolumeKey.up ? 10 : -10);
+  final next = current + (key == VolumeKey.up ? 5 : -5);
   return next
       .clamp(AppSettings.minScrollSpeed, AppSettings.maxScrollSpeed)
       .toDouble();

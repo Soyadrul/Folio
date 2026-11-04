@@ -15,9 +15,9 @@ void main() {
   });
 
   group('scrollSpeedAfterVolumeKey', () {
-    test('volume up adds 10 and volume down subtracts 10', () {
-      expect(scrollSpeedAfterVolumeKey(40, VolumeKey.up), 50);
-      expect(scrollSpeedAfterVolumeKey(40, VolumeKey.down), 30);
+    test('volume up adds 5 and volume down subtracts 5', () {
+      expect(scrollSpeedAfterVolumeKey(40, VolumeKey.up), 45);
+      expect(scrollSpeedAfterVolumeKey(40, VolumeKey.down), 35);
     });
 
     test('never leaves the supported 5-300 range', () {
