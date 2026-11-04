@@ -68,6 +68,37 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
   }
 
   @override
+  void didUpdateWidget(covariant FlutterReader oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final changed =
+        oldWidget.settings.fontSize != widget.settings.fontSize ||
+        oldWidget.settings.lineHeight != widget.settings.lineHeight ||
+        oldWidget.settings.fontFamily != widget.settings.fontFamily ||
+        oldWidget.settings.textAlign != widget.settings.textAlign ||
+        oldWidget.settings.hyphenation != widget.settings.hyphenation ||
+        oldWidget.settings.marginHorizontal !=
+            widget.settings.marginHorizontal ||
+        oldWidget.settings.readingMode != widget.settings.readingMode;
+    if (!changed || !_scroll.hasClients) return;
+
+    // A new text style changes the scroll extent. Remember the relative
+    // position before the rebuild and restore it once the new layout exists.
+    final max = _scroll.position.maxScrollExtent;
+    if (max <= 0) return;
+    final progress = (_scroll.position.pixels / max).clamp(0.0, 1.0);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scroll.hasClients) return;
+      final target = (_scroll.position.maxScrollExtent * progress).clamp(
+        0.0,
+        _scroll.position.maxScrollExtent,
+      );
+      _scroll.jumpTo(target);
+      _autoPosition = target;
+      _report(force: true);
+    });
+  }
+
+  @override
   void dispose() {
     widget.controller.detach(this);
     _ticker.dispose();

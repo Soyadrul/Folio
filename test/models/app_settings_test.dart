@@ -90,6 +90,11 @@ void main() {
     expect(settings.autoScrollSpeed, 5);
   });
 
+  test('migrates the old automatic theme to Light', () {
+    final settings = AppSettings.fromJson(const {'readingMode': 0});
+    expect(settings.readingMode, ReadingMode.light);
+  });
+
   test('ignores invalid enum indexes instead of throwing', () {
     final settings = AppSettings.fromJson(const {
       'readingMode': 99,

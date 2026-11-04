@@ -6,6 +6,12 @@ import '../models/app_settings.dart';
 import '../providers/settings_provider.dart';
 import '../utils/theme_utils.dart';
 
+/// Settings grouped exactly like section 8 of the specification: the reading
+/// mode, options for both modes, Book mode and Scroll mode.
+///
+/// Every change is written to [SharedPreferences] immediately by
+/// [SettingsNotifier], so there is no Save button and closing the app keeps
+/// the latest values.
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
 
@@ -33,117 +39,211 @@ class SettingsScreen extends ConsumerWidget {
         ],
       ),
       body: ListView(
-        padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
+        padding: const EdgeInsets.only(bottom: 32),
         children: [
-          // ── Preview card ──────────────────────────────────────────────
           _buildPreviewCard(context, settings, brightness),
 
-          const SizedBox(height: 8),
-
-          // ── Reading mode ──────────────────────────────────────────────
+          // ── Mode ─────────────────────────────────────────────────────
           _buildSection(
             context,
-            title: 'Display Mode',
-            children: [_buildReadingModeSelector(context, settings, notifier)],
+            title: 'Mode',
+            children: [_buildReaderModeSelector(context, settings, notifier)],
           ),
 
-          // ── Typography ────────────────────────────────────────────────
+          // ── Both modes ───────────────────────────────────────────────
           _buildSection(
             context,
-            title: 'Typography',
+            title: 'Both modes',
             children: [
-              _buildFontFamilyTile(context, settings, notifier),
-              _buildTextAlignmentSelector(context, settings, notifier),
-              SwitchListTile(
-                title: Text('Hyphenation', style: _tileTextStyle(context)),
-                subtitle: Text(
-                  'Enable automatic hyphenation for justified text.',
-                  style: _subtitleStyle(context),
-                ),
-                value: settings.hyphenation,
-                activeThumbColor: kAccentColor,
-                onChanged: settings.textAlign == TextAlign.justify
-                    ? (v) => notifier.update((s) => s.copyWith(hyphenation: v))
-                    : null,
-              ),
-              _buildHyphenationLanguageSelector(context, settings, notifier),
               _buildSliderTile(
                 context,
-                label: 'Font Size',
+                label: 'Font size',
                 value: settings.fontSize,
-                min: 12,
-                max: 32,
-                divisions: 20,
-                displayValue: '${settings.fontSize.toInt()}px',
+                min: AppSettings.minFontSize,
+                max: AppSettings.maxFontSize,
+                divisions: (AppSettings.maxFontSize - AppSettings.minFontSize)
+                    .round(),
+                displayValue: '${settings.fontSize.round()} px',
                 onChanged: (v) =>
                     notifier.update((s) => s.copyWith(fontSize: v)),
               ),
               _buildSliderTile(
                 context,
-                label: 'Line Spacing',
+                label: 'Line spacing',
                 value: settings.lineHeight,
-                min: 1.0,
-                max: 2.5,
-                divisions: 15,
+                min: AppSettings.minLineHeight,
+                max: AppSettings.maxLineHeight,
+                divisions:
+                    ((AppSettings.maxLineHeight - AppSettings.minLineHeight) *
+                            10)
+                        .round(),
                 displayValue: settings.lineHeight.toStringAsFixed(1),
                 onChanged: (v) =>
                     notifier.update((s) => s.copyWith(lineHeight: v)),
               ),
-            ],
-          ),
-
-          // ── Layout ────────────────────────────────────────────────────
-          _buildSection(
-            context,
-            title: 'Layout',
-            children: [
               _buildSliderTile(
                 context,
-                label: 'Side Margins',
+                label: 'Margins',
                 value: settings.marginHorizontal,
-                min: 8,
-                max: 60,
-                divisions: 26,
-                displayValue: '${settings.marginHorizontal.toInt()}px',
+                min: AppSettings.minMargin,
+                max: AppSettings.maxMargin,
+                divisions: (AppSettings.maxMargin - AppSettings.minMargin)
+                    .round(),
+                displayValue: '${settings.marginHorizontal.round()} px',
                 onChanged: (v) =>
                     notifier.update((s) => s.copyWith(marginHorizontal: v)),
               ),
-            ],
-          ),
-
-          // ── Behaviour ─────────────────────────────────────────────────
-          _buildSection(
-            context,
-            title: 'Behaviour',
-            children: [
-              SwitchListTile(
-                title: Text('Keep screen on while reading',
-                    style: _tileTextStyle(context)),
-                subtitle: Text(
-                  'Prevents the display from dimming.',
-                  style: _subtitleStyle(context),
-                ),
+              _buildThemeSelector(context, settings, notifier),
+              _buildSwitchTile(
+                context,
+                title: 'Keep screen on',
+                subtitle: 'Prevents the display from sleeping while reading.',
                 value: settings.keepScreenOn,
-                activeThumbColor: kAccentColor,
                 onChanged: (v) =>
                     notifier.update((s) => s.copyWith(keepScreenOn: v)),
               ),
-              SwitchListTile(
-                title: Text('Show progress bar',
-                    style: _tileTextStyle(context)),
-                subtitle: Text(
-                  'Displays reading progress at the bottom.',
-                  style: _subtitleStyle(context),
-                ),
+              _buildFontFamilyTile(context, settings, notifier),
+              _buildTextAlignmentSelector(context, settings, notifier),
+              _buildSwitchTile(
+                context,
+                title: 'Hyphenation',
+                subtitle: 'Hyphenate justified text automatically.',
+                value: settings.hyphenation,
+                onChanged: settings.textAlign == TextAlign.justify
+                    ? (v) => notifier.update((s) => s.copyWith(hyphenation: v))
+                    : null,
+              ),
+              _buildHyphenationLanguageSelector(context, settings, notifier),
+              _buildSwitchTile(
+                context,
+                title: 'Progress bar',
+                subtitle: 'Show reading progress in the reader menu.',
                 value: settings.showProgressBar,
-                activeThumbColor: kAccentColor,
                 onChanged: (v) =>
                     notifier.update((s) => s.copyWith(showProgressBar: v)),
               ),
             ],
           ),
 
-          const SizedBox(height: 32),
+          // ── Book mode ────────────────────────────────────────────────
+          _buildSection(
+            context,
+            title: 'Book mode',
+            children: [
+              _buildSwitchTile(
+                context,
+                title: 'Volume buttons turn pages',
+                subtitle: 'Volume down goes forward, volume up goes back.',
+                value: settings.volumeButtonsTurnPages,
+                onChanged: (v) => notifier.update(
+                  (s) => s.copyWith(volumeButtonsTurnPages: v),
+                ),
+              ),
+              _buildSwitchTile(
+                context,
+                title: 'Invert volume buttons',
+                subtitle: 'Make volume up go forward instead.',
+                value: settings.invertVolumeButtons,
+                onChanged: (v) =>
+                    notifier.update((s) => s.copyWith(invertVolumeButtons: v)),
+              ),
+              _buildSwitchTile(
+                context,
+                title: 'Tap zones',
+                subtitle:
+                    'Tap the left edge to go back, the right edge forward.',
+                value: settings.tapZones,
+                onChanged: (v) =>
+                    notifier.update((s) => s.copyWith(tapZones: v)),
+              ),
+              _buildSliderTile(
+                context,
+                label: 'Tap zone width',
+                value: settings.tapZoneWidth,
+                min: AppSettings.minTapZoneWidth,
+                max: AppSettings.maxTapZoneWidth,
+                divisions:
+                    (AppSettings.maxTapZoneWidth - AppSettings.minTapZoneWidth)
+                        .round(),
+                displayValue: '${settings.tapZoneWidth.round()}%',
+                onChanged: (v) =>
+                    notifier.update((s) => s.copyWith(tapZoneWidth: v)),
+              ),
+              _buildSwitchTile(
+                context,
+                title: 'Swipe to turn page',
+                subtitle:
+                    'Swipe left for the next page, right for the previous.',
+                value: settings.swipeToTurnPage,
+                onChanged: (v) =>
+                    notifier.update((s) => s.copyWith(swipeToTurnPage: v)),
+              ),
+              _buildSwitchTile(
+                context,
+                title: 'Page animation',
+                subtitle: 'Slide the page into place when turning.',
+                value: settings.pageAnimation,
+                onChanged: (v) =>
+                    notifier.update((s) => s.copyWith(pageAnimation: v)),
+              ),
+            ],
+          ),
+
+          // ── Scroll mode ──────────────────────────────────────────────
+          _buildSection(
+            context,
+            title: 'Scroll mode',
+            children: [
+              _buildSliderTile(
+                context,
+                label: 'Scroll speed',
+                value: settings.autoScrollSpeed,
+                min: AppSettings.minScrollSpeed,
+                max: AppSettings.maxScrollSpeed,
+                divisions:
+                    ((AppSettings.maxScrollSpeed - AppSettings.minScrollSpeed) /
+                            5)
+                        .round(),
+                displayValue: '${settings.autoScrollSpeed.round()} px/s',
+                onChanged: (v) =>
+                    notifier.update((s) => s.copyWith(autoScrollSpeed: v)),
+              ),
+              _buildSwitchTile(
+                context,
+                title: 'Tap to start or stop',
+                subtitle:
+                    'A tap starts automatic scrolling, another pauses it.',
+                value: settings.tapToStartStop,
+                onChanged: (v) =>
+                    notifier.update((s) => s.copyWith(tapToStartStop: v)),
+              ),
+              _buildSwitchTile(
+                context,
+                title: 'Volume buttons change speed',
+                subtitle: 'Volume up is faster, volume down is slower.',
+                value: settings.volumeButtonsChangeSpeed,
+                onChanged: (v) => notifier.update(
+                  (s) => s.copyWith(volumeButtonsChangeSpeed: v),
+                ),
+              ),
+              _buildSwitchTile(
+                context,
+                title: 'Start automatically when book opens',
+                subtitle: 'Begin scrolling as soon as a book is opened.',
+                value: settings.scrollAutoStart,
+                onChanged: (v) =>
+                    notifier.update((s) => s.copyWith(scrollAutoStart: v)),
+              ),
+            ],
+          ),
+
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+            child: Text(
+              'Changes apply immediately and are saved automatically.',
+              style: _subtitleStyle(context),
+            ),
+          ),
         ],
       ),
     );
@@ -164,7 +264,7 @@ class SettingsScreen extends ConsumerWidget {
     );
 
     return Container(
-      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
       padding: EdgeInsets.symmetric(
         horizontal: settings.marginHorizontal,
         vertical: 20,
@@ -172,10 +272,7 @@ class SettingsScreen extends ConsumerWidget {
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: fg.withValues(alpha: 0.10),
-          width: 1,
-        ),
+        border: Border.all(color: fg.withValues(alpha: 0.10), width: 1),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.08),
@@ -210,44 +307,110 @@ class SettingsScreen extends ConsumerWidget {
     );
   }
 
-  // ── Reading mode selector ────────────────────────────────────────────────
+  // ── Mode selectors ──────────────────────────────────────────────────────
 
-  Widget _buildReadingModeSelector(
+  Widget _buildReaderModeSelector(
     BuildContext context,
     AppSettings settings,
     SettingsNotifier notifier,
   ) {
-    const modes = [
-      (ReadingMode.auto, 'Auto', Icons.brightness_auto_rounded),
-      (ReadingMode.light, 'Light', Icons.light_mode_rounded),
-      (ReadingMode.dark, 'Dark', Icons.dark_mode_rounded),
-      (ReadingMode.sepia, 'Sepia', Icons.tonality_rounded),
+    final options = [
+      (
+        ReaderMode.book,
+        'Book',
+        Icons.auto_stories_rounded,
+        'One page at a time',
+      ),
+      (
+        ReaderMode.scroll,
+        'Scroll',
+        Icons.vertical_align_bottom_rounded,
+        'Continuous text',
+      ),
     ];
+    return _buildChipRow(
+      context,
+      options.map((entry) {
+        final (mode, label, icon, description) = entry;
+        return _OptionChip(
+          icon: icon,
+          label: label,
+          description: description,
+          selected: settings.readerMode == mode,
+          onTap: () => notifier.update((s) => s.copyWith(readerMode: mode)),
+        );
+      }).toList(),
+    );
+  }
 
+  Widget _buildThemeSelector(
+    BuildContext context,
+    AppSettings settings,
+    SettingsNotifier notifier,
+  ) {
+    final options = [
+      (ReadingMode.light, 'Light', Icons.light_mode_rounded),
+      (ReadingMode.sepia, 'Sepia', Icons.tonality_rounded),
+      (ReadingMode.dark, 'Dark', Icons.dark_mode_rounded),
+    ];
+    return _buildChipRow(
+      context,
+      options.map((entry) {
+        final (mode, label, icon) = entry;
+        return _OptionChip(
+          icon: icon,
+          label: label,
+          selected: settings.readingMode == mode,
+          onTap: () => notifier.update((s) => s.copyWith(readingMode: mode)),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildTextAlignmentSelector(
+    BuildContext context,
+    AppSettings settings,
+    SettingsNotifier notifier,
+  ) {
+    final options = [
+      (TextAlign.left, 'Left', Icons.format_align_left_rounded),
+      (TextAlign.justify, 'Justify', Icons.format_align_justify_rounded),
+      (TextAlign.right, 'Right', Icons.format_align_right_rounded),
+    ];
+    return _buildChipRow(
+      context,
+      options.map((entry) {
+        final (align, label, icon) = entry;
+        return _OptionChip(
+          icon: icon,
+          label: label,
+          selected: settings.textAlign == align,
+          onTap: () => notifier.update((s) => s.copyWith(textAlign: align)),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildChipRow(BuildContext context, List<Widget> chips) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
       child: Row(
-        children: modes.map((entry) {
-          final (mode, label, icon) = entry;
-          final isSelected = settings.readingMode == mode;
-          return Expanded(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: _ModeChip(
-                icon: icon,
-                label: label,
-                selected: isSelected,
-                onTap: () =>
-                    notifier.update((s) => s.copyWith(readingMode: mode)),
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: chips
+            .map(
+              (chip) => Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: chip,
+                ),
               ),
-            ),
-          );
-        }).toList(),
+            )
+            .toList(),
       ),
     );
   }
 
-  // ── Font family picker ────────────────────────────────────────────────────
+  // ── Font family picker ──────────────────────────────────────────────────
 
   Widget _buildFontFamilyTile(
     BuildContext context,
@@ -255,7 +418,7 @@ class SettingsScreen extends ConsumerWidget {
     SettingsNotifier notifier,
   ) {
     return ListTile(
-      title: Text('Font Family', style: _tileTextStyle(context)),
+      title: Text('Font family', style: _tileTextStyle(context)),
       trailing: DropdownButtonHideUnderline(
         child: DropdownButton<String>(
           value: settings.fontFamily,
@@ -270,11 +433,11 @@ class SettingsScreen extends ConsumerWidget {
           },
           items: kAvailableFonts
               .map(
-                (f) => DropdownMenuItem(
-                  value: f,
+                (font) => DropdownMenuItem(
+                  value: font,
                   child: Text(
-                    f,
-                    style: GoogleFonts.getFont(f, fontSize: 13),
+                    font,
+                    style: GoogleFonts.getFont(font, fontSize: 13),
                   ),
                 ),
               )
@@ -284,50 +447,13 @@ class SettingsScreen extends ConsumerWidget {
     );
   }
 
-  // ── Text alignment selector ───────────────────────────────────────────────
-
-  Widget _buildTextAlignmentSelector(
-    BuildContext context,
-    AppSettings settings,
-    SettingsNotifier notifier,
-  ) {
-    const alignments = [
-      (TextAlign.left, 'Left', Icons.format_align_left_rounded),
-      (TextAlign.justify, 'Justify', Icons.format_align_justify_rounded),
-      (TextAlign.right, 'Right', Icons.format_align_right_rounded),
-    ];
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-      child: Row(
-        children: alignments.map((entry) {
-          final (align, label, icon) = entry;
-          final isSelected = settings.textAlign == align;
-          return Expanded(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: _AlignmentChip(
-                icon: icon,
-                label: label,
-                selected: isSelected,
-                onTap: () =>
-                    notifier.update((s) => s.copyWith(textAlign: align)),
-              ),
-            ),
-          );
-        }).toList(),
-      ),
-    );
-  }
-
-  // ── Hyphenation language selector ─────────────────────────────────────────
+  // ── Hyphenation language selector ───────────────────────────────────────
 
   Widget _buildHyphenationLanguageSelector(
     BuildContext context,
     AppSettings settings,
     SettingsNotifier notifier,
   ) {
-    // Available hyphenation languages
     const languages = [
       ('en_us', 'English (US)'),
       ('it', 'Italian'),
@@ -337,15 +463,18 @@ class SettingsScreen extends ConsumerWidget {
       ('pt', 'Portuguese'),
     ];
 
-    final isEnabled = settings.hyphenation && settings.textAlign == TextAlign.justify;
+    final isEnabled =
+        settings.hyphenation && settings.textAlign == TextAlign.justify;
 
     return ListTile(
-      title: Text('Hyphenation Language', style: _tileTextStyle(context)),
+      title: Text('Hyphenation language', style: _tileTextStyle(context)),
       subtitle: Text(
-        languages.firstWhere(
-          (lang) => lang.$1 == settings.hyphenationLanguage,
-          orElse: () => ('en_us', 'English (US)'),
-        ).$2,
+        languages
+            .firstWhere(
+              (lang) => lang.$1 == settings.hyphenationLanguage,
+              orElse: () => ('en_us', 'English (US)'),
+            )
+            .$2,
         style: _subtitleStyle(context),
       ),
       trailing: isEnabled
@@ -367,7 +496,23 @@ class SettingsScreen extends ConsumerWidget {
     );
   }
 
-  // ── Slider tile ───────────────────────────────────────────────────────────
+  // ── Shared rows ─────────────────────────────────────────────────────────
+
+  Widget _buildSwitchTile(
+    BuildContext context, {
+    required String title,
+    required String subtitle,
+    required bool value,
+    required ValueChanged<bool>? onChanged,
+  }) {
+    return SwitchListTile(
+      title: Text(title, style: _tileTextStyle(context)),
+      subtitle: Text(subtitle, style: _subtitleStyle(context)),
+      value: value,
+      activeThumbColor: kAccentColor,
+      onChanged: onChanged,
+    );
+  }
 
   Widget _buildSliderTile(
     BuildContext context, {
@@ -388,8 +533,10 @@ class SettingsScreen extends ConsumerWidget {
               Text(label, style: _tileTextStyle(context)),
               const Spacer(),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 3,
+                ),
                 decoration: BoxDecoration(
                   color: kAccentColor.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(8),
@@ -407,7 +554,7 @@ class SettingsScreen extends ConsumerWidget {
           ),
         ),
         Slider(
-          value: value,
+          value: value.clamp(min, max).toDouble(),
           min: min,
           max: max,
           divisions: divisions,
@@ -418,7 +565,7 @@ class SettingsScreen extends ConsumerWidget {
     );
   }
 
-  // ── Section builder ───────────────────────────────────────────────────────
+  // ── Section builder ─────────────────────────────────────────────────────
 
   Widget _buildSection(
     BuildContext context, {
@@ -443,47 +590,50 @@ class SettingsScreen extends ConsumerWidget {
         ...children,
         Divider(
           height: 1,
-          color: Theme.of(context)
-              .dividerColor
-              .withValues(alpha: 0.5),
+          color: Theme.of(context).dividerColor.withValues(alpha: 0.5),
         ),
       ],
     );
   }
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
+  // ── Helpers ─────────────────────────────────────────────────────────────
 
   TextStyle _tileTextStyle(BuildContext context) =>
       GoogleFonts.lato(fontSize: 15, fontWeight: FontWeight.w500);
 
   TextStyle _subtitleStyle(BuildContext context) => GoogleFonts.lato(
-        fontSize: 12,
-        color: Theme.of(context).textTheme.bodyMedium?.color,
-      );
+    fontSize: 12,
+    color: Theme.of(context).textTheme.bodyMedium?.color,
+  );
 }
 
-// ── Mode chip widget ───────────────────────────────────────────────────────
+// ── Option chip ────────────────────────────────────────────────────────────
 
-class _ModeChip extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  const _ModeChip({
+class _OptionChip extends StatelessWidget {
+  const _OptionChip({
     required this.icon,
     required this.label,
     required this.selected,
     required this.onTap,
+    this.description,
   });
+
+  final IconData icon;
+  final String label;
+  final String? description;
+  final bool selected;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
+    final color = selected
+        ? kAccentColor
+        : Theme.of(context).textTheme.bodyMedium?.color;
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
-        padding: const EdgeInsets.symmetric(vertical: 10),
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
         decoration: BoxDecoration(
           color: selected
               ? kAccentColor.withValues(alpha: 0.15)
@@ -497,98 +647,30 @@ class _ModeChip extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              icon,
-              size: 22,
-              color: selected
-                  ? kAccentColor
-                  : Theme.of(context)
-                      .textTheme
-                      .bodyMedium
-                      ?.color,
-            ),
+            Icon(icon, size: 22, color: color),
             const SizedBox(height: 4),
             Text(
               label,
+              textAlign: TextAlign.center,
               style: GoogleFonts.lato(
                 fontSize: 11,
-                fontWeight:
-                    selected ? FontWeight.w700 : FontWeight.w500,
-                color: selected
-                    ? kAccentColor
-                    : Theme.of(context)
-                        .textTheme
-                        .bodyMedium
-                        ?.color,
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                color: color,
               ),
             ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ── Alignment chip widget ───────────────────────────────────────────────────
-
-class _AlignmentChip extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  const _AlignmentChip({
-    required this.icon,
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        padding: const EdgeInsets.symmetric(vertical: 10),
-        decoration: BoxDecoration(
-          color: selected
-              ? kAccentColor.withValues(alpha: 0.15)
-              : Theme.of(context).cardTheme.color,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: selected ? kAccentColor : Colors.transparent,
-            width: 1.5,
-          ),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              icon,
-              size: 22,
-              color: selected
-                  ? kAccentColor
-                  : Theme.of(context)
-                      .textTheme
-                      .bodyMedium
-                      ?.color,
-            ),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: GoogleFonts.lato(
-                fontSize: 11,
-                fontWeight:
-                    selected ? FontWeight.w700 : FontWeight.w500,
-                color: selected
-                    ? kAccentColor
-                    : Theme.of(context)
-                        .textTheme
-                        .bodyMedium
-                        ?.color,
+            if (description != null) ...[
+              const SizedBox(height: 2),
+              Text(
+                description!,
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.lato(
+                  fontSize: 9,
+                  color: color?.withValues(alpha: 0.65),
+                ),
               ),
-            ),
+            ],
           ],
         ),
       ),

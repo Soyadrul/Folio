@@ -12,7 +12,9 @@ import '../models/book.dart';
 import '../providers/library_provider.dart';
 import '../providers/settings_provider.dart';
 import '../reader/flutter_reader.dart';
+import '../reader/keep_screen_on.dart';
 import '../reader/reader_content_controller.dart';
+import '../reader/reading_position.dart';
 import '../reader/volume_keys.dart';
 import '../reader/webview_reader.dart';
 import '../utils/theme_utils.dart';
@@ -33,6 +35,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   final ReaderContentController _content = ReaderContentController();
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+  final ReadingPositionStore _positions = const ReadingPositionStore();
 
   EpubDocument? _document;
   String? _error;
@@ -72,7 +75,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     _fade.value = 1;
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     VolumeKeys.setHandler(_onVolumeKey);
-    _syncVolumeKeys(ref.read(settingsNotifierProvider));
+    final settings = ref.read(settingsNotifierProvider);
+    _syncVolumeKeys(settings);
+    KeepScreenOn.setEnabled(settings.keepScreenOn);
     _openBook();
   }
 
@@ -83,6 +88,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     _persistPosition(force: true);
     VolumeKeys.setHandler(null);
     if (_volumeKeysEnabled) VolumeKeys.setEnabled(false);
+    KeepScreenOn.setEnabled(false);
     _fade.dispose();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     super.dispose();
@@ -92,6 +98,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) {
       _content.pauseAutoScroll();
+      // The process can be killed in the background, so save now instead of
+      // waiting for dispose.
+      _persistPosition(force: true);
     } else if (_uiVisible) {
       _fade.forward();
     }
@@ -146,11 +155,21 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   Future<void> _openBook() async {
     try {
       final document = await EpubLoader().load(widget.book.path);
+      ReadingPosition? saved;
+      try {
+        saved = await _positions.load(widget.book.path);
+      } catch (error) {
+        debugPrint('Folio: could not read the saved position: $error');
+      }
       if (!mounted) return;
-      final index = _chapterIndex.clamp(0, document.chapters.length - 1);
+      final chapter = saved?.chapterIndex ?? _chapterIndex;
+      final progress = saved?.progress ?? _chapterProgress;
+      final index = chapter.clamp(0, document.chapters.length - 1);
       setState(() {
         _document = document;
         _chapterIndex = index;
+        _chapterProgress = progress;
+        _element = saved?.element;
         _totalChapters = document.chapters.length;
       });
       _syncVolumeKeys(ref.read(settingsNotifierProvider));
@@ -208,8 +227,10 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   }
 
   void _persistPosition({bool force = false}) {
-    if (!force && _document == null) return;
-    _lastSavedMs = DateTime.now().millisecondsSinceEpoch;
+    if (_document == null) return;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (!force && now - _lastSavedMs < 500) return;
+    _lastSavedMs = now;
     ref
         .read(libraryProvider.notifier)
         .updateReadingProgress(
@@ -217,6 +238,20 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
           _chapterIndex,
           _chapterProgress,
         );
+    unawaited(
+      _positions
+          .save(
+            widget.book.path,
+            ReadingPosition(
+              chapterIndex: _chapterIndex,
+              progress: _chapterProgress,
+              element: _element,
+            ),
+          )
+          .catchError((Object error) {
+            debugPrint('Folio: could not save the reading position: $error');
+          }),
+    );
   }
 
   double get _overallProgress {
@@ -242,6 +277,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     final settings = ref.watch(settingsNotifierProvider);
     ref.listen<AppSettings>(settingsNotifierProvider, (_, next) {
       _syncVolumeKeys(next);
+      KeepScreenOn.setEnabled(next.keepScreenOn);
     });
     final brightness = MediaQuery.of(context).platformBrightness;
     final background = readerBackground(settings.readingMode, brightness);

@@ -130,6 +130,8 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
         oldWidget.settings.fontFamily != widget.settings.fontFamily ||
         oldWidget.settings.textAlign != widget.settings.textAlign ||
         oldWidget.settings.hyphenation != widget.settings.hyphenation ||
+        oldWidget.settings.marginHorizontal !=
+            widget.settings.marginHorizontal ||
         oldWidget.settings.readingMode != widget.settings.readingMode;
 
     if (modeChanged || typographyChanged) {

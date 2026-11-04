@@ -218,11 +218,9 @@ class AppSettings {
       minMargin,
       maxMargin,
     ),
-    readingMode: _enumValue(
-      ReadingMode.values,
-      json['readingMode'],
-      ReadingMode.light,
-    ),
+    // `auto` is kept in the enum only so old saved indexes still decode; the
+    // Settings page now offers just Light, Sepia and Dark.
+    readingMode: _readingMode(json['readingMode']),
     keepScreenOn: json['keepScreenOn'] as bool? ?? true,
     showProgressBar: json['showProgressBar'] as bool? ?? true,
     readerMode: _enumValue(
@@ -263,6 +261,14 @@ class AppSettings {
   static T _enumValue<T>(List<T> values, Object? raw, T fallback) {
     if (raw is int && raw >= 0 && raw < values.length) return values[raw];
     return fallback;
+  }
+
+  static ReadingMode _readingMode(Object? raw) {
+    if (raw is int && raw >= 0 && raw < ReadingMode.values.length) {
+      final mode = ReadingMode.values[raw];
+      if (mode != ReadingMode.auto) return mode;
+    }
+    return ReadingMode.light;
   }
 
   String toJsonString() => jsonEncode(toJson());

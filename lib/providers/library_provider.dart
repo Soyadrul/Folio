@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/book.dart';
+import '../reader/reading_position.dart';
 import '../utils/book_scanner.dart';
 
 // ── Persistence keys ───────────────────────────────────────────────────────
@@ -77,14 +78,11 @@ class LibraryNotifier extends Notifier<LibraryState> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kLibraryFolderKey, path);
 
-    state = state.copyWith(
-      folderPath: path,
-      isLoading: true,
-      clearError: true,
-    );
+    state = state.copyWith(folderPath: path, isLoading: true, clearError: true);
 
     try {
-      final books = await scanFolderForBooks(path);
+      final scanned = await scanFolderForBooks(path);
+      final books = await _withSavedPositions(scanned);
       state = state.copyWith(books: books, isLoading: false);
     } catch (e) {
       state = state.copyWith(
@@ -101,8 +99,37 @@ class LibraryNotifier extends Notifier<LibraryState> {
     await scanFolder(folder);
   }
 
+  /// Merges positions persisted by the reader into freshly scanned books.
+  ///
+  /// A scan creates new [Book] instances without reading progress, so without
+  /// this step the library would forget where each book was left after a
+  /// restart even though the reader itself saved the position.
+  Future<List<Book>> _withSavedPositions(List<Book> books) async {
+    if (books.isEmpty) return books;
+    try {
+      final saved = await const ReadingPositionStore().loadAll();
+      if (saved.isEmpty) return books;
+      return books.map((book) {
+        final position = saved[book.path];
+        if (position == null) return book;
+        return book.copyWith(
+          lastChapterIndex: position.chapterIndex,
+          lastProgress: position.progress,
+        );
+      }).toList();
+    } catch (error) {
+      // A failure to read positions must never hide the scanned books.
+      debugPrint('Folio: could not restore reading positions: $error');
+      return books;
+    }
+  }
+
   /// Updates the saved reading progress for a book (called from the reader).
-  void updateReadingProgress(String bookPath, int chapterIndex, double progress) {
+  void updateReadingProgress(
+    String bookPath,
+    int chapterIndex,
+    double progress,
+  ) {
     final updated = state.books.map((b) {
       if (b.path == bookPath) {
         return b.copyWith(
