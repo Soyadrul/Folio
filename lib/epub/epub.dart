@@ -140,6 +140,14 @@ class EpubLoader {
   final Directory? _cacheRoot;
   Future<Directory>? _resolvedRoot;
 
+  /// Loads currently running in this process, keyed by cache root and book.
+  ///
+  /// The cover service and the reader each used to own their own loader; both
+  /// could extract (and delete) the same folder at the same time. Sharing the
+  /// future also means concurrent callers get the same parsed document.
+  static final Map<String, Future<EpubDocument>> _inFlight = {};
+  static int _tempCounter = 0;
+
   Future<Directory> _root() async {
     final injected = _cacheRoot;
     if (injected != null) return injected;
@@ -152,6 +160,22 @@ class EpubLoader {
   /// Opens (and if needed extracts) the EPUB at [filePath].
   Future<EpubDocument> load(String filePath) async {
     final absolute = p.normalize(p.absolute(filePath));
+    final root = await _root();
+    await root.create(recursive: true);
+    final flightKey = '${root.path}|$absolute';
+    final running = _inFlight[flightKey];
+    if (running != null) return running;
+
+    final future = _load(absolute, root);
+    _inFlight[flightKey] = future;
+    try {
+      return await future;
+    } finally {
+      _inFlight.remove(flightKey);
+    }
+  }
+
+  Future<EpubDocument> _load(String absolute, Directory root) async {
     final file = File(absolute);
     if (!await file.exists()) {
       throw EpubException('The book file is missing: $absolute');
@@ -164,8 +188,6 @@ class EpubLoader {
       throw EpubException('Cannot read the book file: ${e.message}');
     }
 
-    final root = await _root();
-    await root.create(recursive: true);
     final key = sha1.convert(utf8.encode(absolute)).toString();
     final dir = Directory(p.join(root.path, 'epub_${key.substring(0, 16)}'));
     final marker = File(p.join(dir.path, '.folio-cache.json'));
@@ -186,16 +208,8 @@ class EpubLoader {
     }
 
     if (!reusable) {
-      if (await dir.exists()) await dir.delete(recursive: true);
-      await dir.create(recursive: true);
-      await _extract(file, dir);
-      await marker.writeAsString(
-        jsonEncode({
-          'path': absolute,
-          'size': stat.size,
-          'mtime': stat.modified.millisecondsSinceEpoch,
-        }),
-      );
+      await _cleanupStaleExtractions(dir);
+      await _extractAtomically(file, dir, absolute, stat);
     }
 
     return _parse(
@@ -203,6 +217,56 @@ class EpubLoader {
       cacheDir: dir.path,
       opfPath: await _findAndParseContainer(dir),
     );
+  }
+
+  /// Extracts into a sibling folder and renames it into place, so a crash or a
+  /// second loader never sees a half-written book with a valid cache marker.
+  Future<void> _extractAtomically(
+    File file,
+    Directory dir,
+    String absolute,
+    FileStat stat,
+  ) async {
+    final temp = Directory(
+      '${dir.path}.tmp-${DateTime.now().microsecondsSinceEpoch}-${_tempCounter++}',
+    );
+    try {
+      await temp.create(recursive: true);
+      await _extract(file, temp);
+      await File(p.join(temp.path, '.folio-cache.json')).writeAsString(
+        jsonEncode({
+          'path': absolute,
+          'size': stat.size,
+          'mtime': stat.modified.millisecondsSinceEpoch,
+        }),
+        flush: true,
+      );
+      if (await dir.exists()) await dir.delete(recursive: true);
+      await temp.rename(dir.path);
+    } catch (_) {
+      if (await temp.exists()) await temp.delete(recursive: true);
+      rethrow;
+    }
+  }
+
+  /// Removes temporary folders left behind by an interrupted extraction.
+  Future<void> _cleanupStaleExtractions(Directory dir) async {
+    final parent = Directory(p.dirname(dir.path));
+    if (!await parent.exists()) return;
+    final prefix = '${p.basename(dir.path)}.tmp-';
+    try {
+      await for (final entity in parent.list(followLinks: false)) {
+        if (entity is! Directory) continue;
+        if (!p.basename(entity.path).startsWith(prefix)) continue;
+        try {
+          await entity.delete(recursive: true);
+        } on FileSystemException {
+          // Another process may still be using it; leave it alone.
+        }
+      }
+    } on FileSystemException {
+      // A cache folder we cannot list is not fatal for opening this book.
+    }
   }
 
   /// Removes every extracted book from the cache.

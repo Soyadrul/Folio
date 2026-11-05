@@ -9,10 +9,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
-import 'package:xml/xml.dart';
 
-import '../epub/epub.dart';
-import '../epub/href_resolver.dart';
+import '../epub/epub_cover.dart';
 import '../models/book.dart';
 
 /// Resolves book covers into small JPEG thumbnails on disk.
@@ -24,14 +22,11 @@ import '../models/book.dart';
 class CoverService {
   CoverService({
     Directory? cacheRoot,
-    EpubLoader? loader,
     this.thumbnailWidth = 300,
     this.maxConcurrent = 2,
-  }) : _cacheRoot = cacheRoot,
-       _loader = loader ?? EpubLoader();
+  }) : _cacheRoot = cacheRoot;
 
   final Directory? _cacheRoot;
-  final EpubLoader _loader;
   final int thumbnailWidth;
 
   /// Extraction + decoding are CPU/IO heavy, so only a couple of cards may
@@ -95,69 +90,47 @@ class CoverService {
     required String bookPath,
     required String destination,
   }) async {
+    // A zero-byte sidecar records "this book has no usable cover", so opening
+    // the same folder again does not unzip and decode it every time.
+    final missingMarker = File('$destination.none');
     try {
       if (await File(destination).exists()) return destination;
-
-      final document = await _loader.load(bookPath);
-      final source = _rasterSource(document);
-      if (source == null) return null;
+      if (await missingMarker.exists()) return null;
 
       final targetWidth = thumbnailWidth;
-      await _withSlot(() async {
+      final rendered = await _withSlot(() async {
+        // Read only the container, package document and cover entry: the book
+        // itself is never extracted, so browsing the library stays cheap.
+        final cover = await Isolate.run(() => readEpubCover(bookPath));
+        if (cover == null) return false;
         await Directory(p.dirname(destination)).create(recursive: true);
         return Isolate.run(
           () => _renderThumbnail(
-            sourcePath: source,
+            bytes: cover.bytes,
             destinationPath: destination,
             width: targetWidth,
           ),
         );
       });
-      return await File(destination).exists() ? destination : null;
+      if (rendered && await File(destination).exists()) return destination;
+      await _writeMissingMarker(missingMarker);
+      return null;
     } catch (e) {
       // A damaged cover, unsupported image format or unreadable book must not
       // stop the rest of the library.
       debugPrint('Folio: no cover for $bookPath ($e)');
+      await _writeMissingMarker(missingMarker);
       return null;
     }
   }
 
-  /// Returns a raster file for the document's cover, unwrapping an SVG cover
-  /// page to the first raster image it references.
-  String? _rasterSource(EpubDocument document) {
-    final cover = document.coverImagePath;
-    if (cover == null) return null;
-    if (p.extension(cover).toLowerCase() != '.svg') return cover;
-    return _rasterInsideSvg(cover, document.rootDir, document.resolver);
-  }
-
-  String? _rasterInsideSvg(
-    String svgPath,
-    String bookRoot,
-    HrefResolver resolver,
-  ) {
+  Future<void> _writeMissingMarker(File marker) async {
     try {
-      final document = XmlDocument.parse(File(svgPath).readAsStringSync());
-      final svgRel = p.relative(svgPath, from: bookRoot).replaceAll('\\', '/');
-      for (final element in document.descendants.whereType<XmlElement>()) {
-        if (element.name.local.toLowerCase() != 'image') continue;
-        String? href;
-        for (final attribute in element.attributes) {
-          if (attribute.name.local.toLowerCase() == 'href') {
-            href = attribute.value;
-            break;
-          }
-        }
-        if (href == null || href.isEmpty) continue;
-        final resolved = resolver.resolve(href, basePath: svgRel);
-        if (resolved.path == null) continue;
-        final absolute = p.joinAll([bookRoot, ...resolved.path!.split('/')]);
-        if (File(absolute).existsSync()) return absolute;
-      }
+      await marker.parent.create(recursive: true);
+      await marker.writeAsBytes(const []);
     } catch (_) {
-      // An unreadable SVG cover just falls back to the placeholder.
+      // The marker only saves work; failing to write it is harmless.
     }
-    return null;
   }
 
   Future<T> _withSlot<T>(Future<T> Function() action) async {
@@ -191,13 +164,14 @@ class _CachedCover {
 
 /// Runs in an isolate: decode, orient, resize and re-encode the cover.
 bool _renderThumbnail({
-  required String sourcePath,
+  required List<int> bytes,
   required String destinationPath,
   required int width,
 }) {
   try {
-    final bytes = File(sourcePath).readAsBytesSync();
-    final decoded = img.decodeImage(bytes);
+    final decoded = img.decodeImage(
+      bytes is Uint8List ? bytes : Uint8List.fromList(bytes),
+    );
     if (decoded == null) return false;
     final oriented = img.bakeOrientation(decoded);
     final resized = oriented.width <= width

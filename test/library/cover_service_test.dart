@@ -1,7 +1,6 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:folio/epub/epub.dart';
 import 'package:folio/library/cover_service.dart';
 import 'package:folio/models/book.dart';
 import 'package:image/image.dart' as img;
@@ -18,22 +17,17 @@ List<int> coverBytes({int width = 600, int height = 900, int shade = 120}) {
 void main() {
   late Directory tmp;
   late Directory coverCache;
-  late Directory epubCache;
 
   setUp(() async {
     tmp = await Directory.systemTemp.createTemp('folio_cover_test_');
     coverCache = Directory(p.join(tmp.path, 'covers'));
-    epubCache = Directory(p.join(tmp.path, 'epubs'));
   });
 
   tearDown(() async {
     if (await tmp.exists()) await tmp.delete(recursive: true);
   });
 
-  CoverService service() => CoverService(
-    cacheRoot: coverCache,
-    loader: EpubLoader(cacheRoot: epubCache),
-  );
+  CoverService service() => CoverService(cacheRoot: coverCache);
 
   Book bookFor(File file) =>
       Book(path: file.path, title: 'Title', author: 'Author');
