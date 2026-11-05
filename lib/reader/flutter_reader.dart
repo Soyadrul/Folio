@@ -51,6 +51,16 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
   bool _restoring = false;
   bool _loading = false;
   int _chapterIndex = 0;
+  int? _pendingChapter;
+  double _pendingProgress = 0;
+  String? _pendingElement;
+  double _lastScrollPixels = 0;
+  int _lastLoadFinishedAt = 0;
+
+  /// A chapter swap moves the scroll position programmatically. Ignore edge
+  /// crossings for a moment afterwards so a restored end-of-chapter position
+  /// does not immediately turn the page again (the "bounce forward" bug).
+  static const _boundaryGuard = Duration(milliseconds: 500);
 
   @override
   void initState() {
@@ -108,15 +118,22 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
 
   Future<void> _load(int index, {double progress = 0, String? element}) async {
     if (index < 0 || index >= widget.document.chapters.length) return;
-    if (_loading) return;
+    if (_loading) {
+      // Fast page turns, volume keys and scroll events must not be dropped:
+      // keep the newest request and run it once the current chapter is in.
+      _pendingChapter = index;
+      _pendingProgress = progress;
+      _pendingElement = element;
+      return;
+    }
     _loading = true;
     final chapter = widget.document.chapters[index];
     final ChapterContent content;
     try {
       content = await widget.document.loadChapterContent(chapter);
     } catch (e) {
-      _loading = false;
       widget.callbacks.onError?.call('Could not load this chapter: $e');
+      _finishLoad();
       return;
     }
     if (!mounted) {
@@ -128,13 +145,14 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
     }
     setState(() {
       _chapterIndex = index;
+      _content = content;
     });
     widget.callbacks.onChapterChanged?.call(index);
     _restoring = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_scroll.hasClients) {
         _restoring = false;
-        _loading = false;
+        _finishLoad();
         return;
       }
       _scroll.jumpTo(0);
@@ -145,21 +163,60 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
         // The Flutter fallback cannot jump to an anchor by id; progress is the
         // fallback. The WebView path handles element-level restoration.
       }
+      _lastScrollPixels = _scroll.position.pixels;
+      _autoPosition = _scroll.position.pixels;
       _restoring = false;
-      _loading = false;
+      _finishLoad();
       _report(force: true);
       if (widget.settings.scrollAutoStart) startAutoScroll();
     });
-    setState(() {
-      _content = content;
-    });
+  }
+
+  /// Ends the current load and starts a request that arrived while it ran.
+  void _finishLoad() {
+    _loading = false;
+    _lastLoadFinishedAt = DateTime.now().millisecondsSinceEpoch;
+    final pending = _pendingChapter;
+    if (pending == null) return;
+    final progress = _pendingProgress;
+    final element = _pendingElement;
+    _pendingChapter = null;
+    _pendingProgress = 0;
+    _pendingElement = null;
+    if (mounted) _load(pending, progress: progress, element: element);
   }
 
   ChapterContent? _content;
 
   void _onScroll() {
     if (_restoring || !_scroll.hasClients) return;
+    final pixels = _scroll.position.pixels;
+    final direction = pixels > _lastScrollPixels
+        ? 1
+        : (pixels < _lastScrollPixels ? -1 : 0);
+    _lastScrollPixels = pixels;
     _report();
+    _maybeCrossChapter(direction);
+  }
+
+  /// Turns the page only after the reader has actually reached an edge.
+  ///
+  /// A chapter shorter than the viewport has `maxScrollExtent == 0`; it must
+  /// stay on screen instead of immediately loading the next chapter.
+  void _maybeCrossChapter(int direction) {
+    if (direction == 0 || _loading || _restoring) return;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (now - _lastLoadFinishedAt < _boundaryGuard.inMilliseconds) return;
+    final position = _scroll.position;
+    final max = position.maxScrollExtent;
+    if (direction > 0 &&
+        max > 0 &&
+        position.pixels >= max - 1 &&
+        _chapterIndex + 1 < widget.document.chapters.length) {
+      _load(_chapterIndex + 1);
+    } else if (direction < 0 && position.pixels <= 1 && _chapterIndex > 0) {
+      _load(_chapterIndex - 1, progress: 1);
+    }
   }
 
   void _report({bool force = false}) {
@@ -182,12 +239,6 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
         pages: pages,
       ),
     );
-    final nextChapter = _chapterIndex + 1;
-    if (_chapterIndex < widget.document.chapters.length - 1 &&
-        _scroll.position.pixels >=
-            _scroll.position.maxScrollExtent - viewport * 0.2) {
-      _load(nextChapter);
-    }
   }
 
   int _lastReport = 0;
