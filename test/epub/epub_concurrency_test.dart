@@ -54,10 +54,7 @@ void main() {
     await file.writeAsBytes([1, 2, 3, 4, 5]);
     final loader = EpubLoader(cacheRoot: cache);
 
-    await expectLater(
-      loader.load(file.path),
-      throwsA(isA<EpubException>()),
-    );
+    await expectLater(loader.load(file.path), throwsA(isA<EpubException>()));
 
     await EpubFixture.write(tmp, epub2Entries());
     final document = await loader.load(file.path);

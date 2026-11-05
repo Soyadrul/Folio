@@ -39,7 +39,10 @@ const Map<String, List<ReaderFontFace>> kReaderFontFaces = {
     ),
   ],
   'Lora': [
-    ReaderFontFace('assets/reader/fonts/lora-normal-400.woff2', weight: '400 700'),
+    ReaderFontFace(
+      'assets/reader/fonts/lora-normal-400.woff2',
+      weight: '400 700',
+    ),
     ReaderFontFace(
       'assets/reader/fonts/lora-italic-400.woff2',
       weight: '400',

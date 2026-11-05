@@ -226,9 +226,7 @@ String? _rasterInsideSvg(
   final file = entries[svgPath];
   if (file == null) return null;
   try {
-    final document = XmlDocument.parse(
-      _text(file.readBytes() ?? const []),
-    );
+    final document = XmlDocument.parse(_text(file.readBytes() ?? const []));
     for (final element in document.descendants.whereType<XmlElement>()) {
       if (element.name.local.toLowerCase() != 'image') continue;
       String? href;
@@ -263,8 +261,7 @@ bool _isImagePath(String path) {
       lower.endsWith('.bmp');
 }
 
-String _text(List<int> bytes) =>
-    utf8.decode(bytes, allowMalformed: true);
+String _text(List<int> bytes) => utf8.decode(bytes, allowMalformed: true);
 
 String? _safeEntryName(String rawName) {
   var name = rawName.replaceAll('\\', '/');
