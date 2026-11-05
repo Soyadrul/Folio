@@ -104,6 +104,21 @@
     document.body.classList.toggle('folio-scroll', !isBook());
   }
 
+  // Dart embeds the selected font as base64 @font-face rules. Keeping them in
+  // one style element lets a font change take effect without reloading the
+  // shell (which would lose the reading position).
+  function setFontFaces(css) {
+    let style = document.getElementById('folio-font-faces');
+    if (!style) {
+      style = document.createElement('style');
+      style.id = 'folio-font-faces';
+      const parent = document.head || document.documentElement;
+      parent.insertBefore(style, parent.firstElementChild || null);
+    }
+    style.textContent = css;
+    relayout(80);
+  }
+
   function sections() {
     return Array.prototype.slice.call(
       content().querySelectorAll('.folio-chapter')
@@ -704,6 +719,7 @@
       relayout(0);
     },
     setSettings: applySettings,
+    setFontFaces: setFontFaces,
     setChapter: setChapter,
     appendChapter: appendChapter,
     prependChapter: prependChapter,

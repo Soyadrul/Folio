@@ -331,6 +331,25 @@ test('progress reports the first identified element inside the viewport', async 
   assert.equal(lastProgress(reader.posts).element, 'chapter-heading');
 });
 
+test('font faces can be replaced without recreating the style element', async () => {
+  const reader = loadReader();
+  reader.folio.init(defaults());
+
+  reader.folio.setFontFaces("@font-face{font-family:'Lora';}");
+  const style = reader.document.getElementById('folio-font-faces');
+  assert.ok(style, 'a font style element was created');
+  assert.equal(style.textContent, "@font-face{font-family:'Lora';}");
+
+  reader.folio.setFontFaces('/* next family */');
+  assert.equal(
+    reader.document.getElementById('folio-font-faces'),
+    style,
+    'the same element is reused'
+  );
+  assert.equal(style.textContent, '/* next family */');
+  await wait(120);
+});
+
 test('book restore ignores the shell id and uses the saved progress', async () => {
   const reader = loadReader();
   reader.scroller.clientWidth = 400;

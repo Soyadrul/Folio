@@ -13,6 +13,7 @@ import '../epub/href_resolver.dart';
 import '../models/app_settings.dart';
 import '../utils/theme_utils.dart';
 import 'reader_content_controller.dart';
+import 'reader_fonts.dart';
 import 'webview_security.dart';
 
 /// Event reported by the WebView while the reader moves through a book.
@@ -86,6 +87,7 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
     implements ReaderViewBackend {
   InAppWebViewController? _controller;
   String? _shellHtml;
+  String? _fontFacesFamily;
   bool _shellReady = false;
   bool _shellLoaded = false;
   bool _loadingChapter = false;
@@ -146,6 +148,7 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
   }
 
   Future<void> _applySettingsAndRestore(bool modeChanged) async {
+    await _ensureFontFaces();
     await _applySettingsToPage();
     if (modeChanged) {
       // Multi-column and scrolling layouts need a fresh chapter document.
@@ -163,8 +166,10 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
     try {
       final css = await rootBundle.loadString('assets/reader/reader.css');
       final js = await rootBundle.loadString('assets/reader/reader.js');
+      final fonts = await readerFontFaceCss(widget.settings.fontFamily);
       if (!mounted) return;
       setState(() {
+        _fontFacesFamily = widget.settings.fontFamily;
         _shellHtml =
             '''
 <!DOCTYPE html>
@@ -173,6 +178,7 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta http-equiv="Content-Security-Policy" content="${readerContentSecurityPolicy(js)}">
+<style id="folio-font-faces">$fonts</style>
 <style>$css</style>
 </head>
 <body>
@@ -192,6 +198,9 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
   Future<void> _onLoadStop(InAppWebViewController controller) async {
     _shellLoaded = true;
     _shellReady = true;
+    // A settings change during shell construction may have selected another
+    // family; make sure the shell has the matching bytes before it is used.
+    await _ensureFontFaces();
     await controller.evaluateJavascript(
       source: 'folio.init(${jsonEncode(_settingsJson())});',
     );
@@ -207,7 +216,7 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
       'mode': settings.readerMode == ReaderMode.book ? 'book' : 'scroll',
       'fontSize': settings.fontSize,
       'lineHeight': settings.lineHeight,
-      'fontFamily': _fontStack(settings.fontFamily),
+      'fontFamily': readerFontStack(settings.fontFamily),
       'textAlign': settings.textAlign == TextAlign.justify
           ? 'justify'
           : settings.textAlign == TextAlign.center
@@ -228,19 +237,20 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
     };
   }
 
-  static String _fontStack(String family) {
-    const serif = 'Georgia, "Noto Serif", "Times New Roman", serif';
-    const sans = '"Helvetica Neue", "Noto Sans", Arial, sans-serif';
-    final lower = family.toLowerCase();
-    if (lower.contains('sans') ||
-        lower.contains('lato') ||
-        lower.contains('roboto')) {
-      return sans;
-    }
-    if (family.isEmpty || family == 'Merriweather' || family == 'Lora') {
-      return serif;
-    }
-    return '"$family", $serif';
+  /// Swaps the embedded `@font-face` rules when the reader font changes.
+  ///
+  /// Bundled fonts are only ever injected for a family we ship, never for a
+  /// name coming from the book.
+  Future<void> _ensureFontFaces() async {
+    final family = widget.settings.fontFamily;
+    if (_fontFacesFamily == family) return;
+    final css = await readerFontFaceCss(family);
+    _fontFacesFamily = family;
+    final controller = _controller;
+    if (controller == null || !_shellReady) return;
+    await controller.evaluateJavascript(
+      source: 'folio.setFontFaces(${jsonEncode(css)});',
+    );
   }
 
   @override

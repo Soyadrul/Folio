@@ -59,3 +59,4 @@ flutter:
   assets:
     - assets/reader/reader.css
     - assets/reader/reader.js
+    - assets/reader/fonts/
