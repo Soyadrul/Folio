@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -6,6 +7,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:folio/epub/epub.dart';
 import 'package:folio/models/book.dart';
+import 'package:folio/reader/reading_position.dart';
+import 'package:folio/reader/webview_reader.dart';
 import 'package:folio/screens/reader_screen.dart';
 import 'package:folio/utils/theme_utils.dart';
 import 'package:path/path.dart' as p;
@@ -75,6 +78,52 @@ void main() {
       prefs.getKeys().where((key) => key.startsWith('folio_reading_position:')),
       isNotEmpty,
     );
+  });
+
+  testWidgets('chapter-ready does not erase the restored progress', (
+    tester,
+  ) async {
+    final book = Book(path: epub.path, title: 'Old Book', author: 'Jane Doe');
+    final loader = EpubLoader(cacheRoot: Directory(p.join(tmp.path, 'cache')));
+
+    await tester.runAsync(() async {
+      await tester.pumpWidget(
+        ProviderScope(
+          child: MaterialApp(
+            theme: buildLightTheme(),
+            home: ReaderScreen(book: book, loader: loader),
+          ),
+        ),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 1500));
+    });
+    await tester.pump();
+
+    final state = tester.state<ReaderScreenState>(find.byType(ReaderScreen));
+    final callbacks = state.createCallbacks();
+    callbacks.onProgress!(
+      const ReaderProgressEvent(
+        chapterIndex: 0,
+        progress: 0.42,
+        page: 3,
+        pages: 9,
+        element: 'start',
+      ),
+    );
+    // This arrives after JavaScript has restored the position.
+    callbacks.onChapterChanged!(0);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 100));
+
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString('folio_reading_position:${epub.path}');
+    expect(raw, isNotNull);
+    final saved = ReadingPosition.fromJson(
+      Map<String, dynamic>.from(jsonDecode(raw!)),
+    );
+    expect(saved.progress, closeTo(0.42, 0.0001));
+    expect(saved.element, 'start');
   });
 }
 

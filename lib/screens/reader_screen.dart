@@ -32,10 +32,10 @@ class ReaderScreen extends ConsumerStatefulWidget {
   final EpubLoader? loader;
 
   @override
-  ConsumerState<ReaderScreen> createState() => _ReaderScreenState();
+  ConsumerState<ReaderScreen> createState() => ReaderScreenState();
 }
 
-class _ReaderScreenState extends ConsumerState<ReaderScreen>
+class ReaderScreenState extends ConsumerState<ReaderScreen>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   final ReaderContentController _content = ReaderContentController();
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
@@ -405,8 +405,10 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     );
   }
 
-  Widget _buildContent(EpubDocument document, AppSettings settings) {
-    final callbacks = ReaderCallbacks(
+  /// The callbacks handed to the mounted reader view.
+  @visibleForTesting
+  ReaderCallbacks createCallbacks() {
+    return ReaderCallbacks(
       onProgress: _onProgress,
       onPage: (page, pages) {
         if (!mounted) return;
@@ -418,9 +420,11 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
       onChapterChanged: (index) {
         if (!mounted) return;
         setState(() {
+          // The position belongs to the chapter that reported it. Never zero
+          // it here: this callback also arrives after a chapter has restored
+          // its saved position, and resetting would throw that away.
+          if (_chapterIndex != index) _element = null;
           _chapterIndex = index;
-          _chapterProgress = 0;
-          _page = 1;
         });
       },
       onToggleChrome: _toggleUI,
@@ -449,6 +453,10 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
         setState(() => _runtimeError = message);
       },
     );
+  }
+
+  Widget _buildContent(EpubDocument document, AppSettings settings) {
+    final callbacks = createCallbacks();
 
     if (_usesWebView) {
       return WebViewReader(

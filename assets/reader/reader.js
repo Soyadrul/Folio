@@ -148,13 +148,29 @@
   }
 
   function visibleElementId() {
-    const size = viewportSize();
-    const x = Math.floor(size.width / 2);
-    const y = Math.max(2, Math.floor(size.height * 0.15));
-    let el = document.elementFromPoint(x, y);
-    while (el && el !== document.body) {
-      if (el.id) return el.id;
-      el = el.parentElement;
+    const scroll = scroller();
+    const root = content();
+    if (!scroll || !root) return null;
+    const box = scroll.getBoundingClientRect();
+    const book = isBook();
+    // Search the chapter downwards, not upwards. Walking up from the text
+    // under the finger always reaches the shell wrappers first, and saving
+    // "folio-content" made "resume" jump back to the start of the chapter.
+    for (const el of root.querySelectorAll('[id]')) {
+      const id = el.id;
+      if (!id || id.indexOf('folio-') === 0) continue;
+      const rect = el.getBoundingClientRect();
+      // Elements are in document order, so the first one that starts past the
+      // viewport means every later element is off-screen too.
+      if (book) {
+        if (rect.left >= box.right) break;
+      } else if (rect.top >= box.bottom) {
+        break;
+      }
+      const intersects = book
+        ? rect.right > box.left + 2 && rect.left < box.right - 2
+        : rect.bottom > box.top + 2 && rect.top < box.bottom;
+      if (intersects) return id;
     }
     return null;
   }
@@ -290,11 +306,19 @@
 
   function goToProgress(progress, element) {
     const p = clamp(Number(progress) || 0, 0, 1);
-    if (element) {
-      const target = document.getElementById(element);
-      if (target) {
+    if (element && element.indexOf('folio-') !== 0) {
+      // Ids can be repeated by different chapters, so only accept an anchor
+      // from the section that is on screen and only if it really is there.
+      const scope = currentSection() || content();
+      const target = scope
+        ? scope.querySelectorAll('[id]').find(function (el) {
+            return el.id === element;
+          })
+        : null;
+      if (target && content().contains(target)) {
         target.scrollIntoView({ block: 'start', behavior: 'auto' });
         computeLayout();
+        reportProgress(true);
         return;
       }
     }
@@ -367,6 +391,9 @@
         if (payload.progress || payload.element) {
           goToProgress(payload.progress || 0, payload.element);
         }
+        // Always leave a final progress event after the restore, so the host
+        // never persists the position from before the jump.
+        reportProgress(true);
         if (
           state.settings.autoStart &&
           !isBook() &&

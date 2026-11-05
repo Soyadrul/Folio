@@ -321,7 +321,8 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
       _currentChapter = index;
       _lastProgress = progress;
       _lastElement = element;
-      widget.callbacks.onChapterChanged?.call(index);
+      // `chapterReady` below is the authoritative notification: the chapter is
+      // only usable once JavaScript has installed and restored it.
       if (!_shellReady || _controller == null) return;
 
       final payload = _payload(
