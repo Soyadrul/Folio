@@ -166,10 +166,17 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
     try {
       final css = await rootBundle.loadString('assets/reader/reader.css');
       final js = await rootBundle.loadString('assets/reader/reader.js');
-      final fonts = await readerFontFaceCss(widget.settings.fontFamily);
+      var family = widget.settings.fontFamily;
+      var fonts = await readerFontFaceCss(family);
       if (!mounted) return;
+      // The setting may have changed while the assets decoded.
+      if (family != widget.settings.fontFamily) {
+        family = widget.settings.fontFamily;
+        fonts = await readerFontFaceCss(family);
+        if (!mounted) return;
+      }
       setState(() {
-        _fontFacesFamily = widget.settings.fontFamily;
+        _fontFacesFamily = family;
         _shellHtml =
             '''
 <!DOCTYPE html>
@@ -245,6 +252,7 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
     final family = widget.settings.fontFamily;
     if (_fontFacesFamily == family) return;
     final css = await readerFontFaceCss(family);
+    if (!mounted || widget.settings.fontFamily != family) return;
     _fontFacesFamily = family;
     final controller = _controller;
     if (controller == null || !_shellReady) return;
