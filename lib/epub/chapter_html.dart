@@ -50,13 +50,27 @@ ChapterContent rewriteChapterHtml(
 
   final missing = <String>[];
 
-  String? rewrite(String? raw, {bool isLink = false}) {
+  String? rewrite(
+    String? raw, {
+    bool isLink = false,
+    bool isStylesheet = false,
+    bool allowData = false,
+  }) {
     if (raw == null || raw.trim().isEmpty) return raw;
     final value = raw.trim();
-    if (value.toLowerCase().startsWith('javascript:')) return null;
+    final lower = value.toLowerCase();
+    if (lower.startsWith('javascript:')) return null;
+    if (lower.startsWith('data:')) {
+      // Data images are safe and used by many books; data links are not.
+      return allowData ? value : null;
+    }
 
     final resolved = resolver.resolve(value, basePath: chapterPath);
-    if (resolved.isExternal) return value;
+    if (resolved.isExternal) {
+      // Keep ordinary web links so the reader can report them, but never let
+      // a book load remote frames, images, media or stylesheets.
+      return isLink && !isStylesheet ? value : null;
+    }
     if (resolved.path == null) {
       if (!isLink) missing.add(resolved.normalizedPath ?? value);
       return null;
@@ -76,7 +90,7 @@ ChapterContent rewriteChapterHtml(
     for (final candidate in value.split(',')) {
       final parts = candidate.trim().split(RegExp(r'\s+'));
       if (parts.isEmpty || parts.first.isEmpty) continue;
-      final rewritten = rewrite(parts.first);
+      final rewritten = rewrite(parts.first, allowData: true);
       if (rewritten == null) continue;
       kept.add([rewritten, ...parts.skip(1)].join(' '));
     }
@@ -87,11 +101,28 @@ ChapterContent rewriteChapterHtml(
     }
   }
 
+  // Elements that can execute code, navigate the WebView, or contact the
+  // network. Book content is untrusted input, so they are removed outright
+  // instead of being sanitised attribute by attribute.
+  const blockedTags = {
+    'script',
+    'iframe',
+    'frame',
+    'frameset',
+    'object',
+    'embed',
+    'applet',
+    'meta',
+    'base',
+    'form',
+  };
+  const blockedAttributes = {'srcdoc', 'formaction', 'ping'};
+
   final elements = document.querySelectorAll('*');
   for (final element in elements) {
     final tag = element.localName?.toLowerCase() ?? '';
 
-    if (tag == 'script') {
+    if (blockedTags.contains(tag)) {
       element.remove();
       continue;
     }
@@ -111,20 +142,64 @@ ChapterContent rewriteChapterHtml(
       }
     }
 
-    // Book scripts and inline handlers must not run inside the reader shell.
+    // Book scripts, inline handlers and form/ping targets must not run inside
+    // the reader shell.
     for (final name in element.attributes.keys.toList()) {
-      if (name.toString().toLowerCase().startsWith('on')) {
+      final lower = name.toString().toLowerCase();
+      if (lower.startsWith('on') || blockedAttributes.contains(lower)) {
         element.attributes.remove(name);
       }
     }
 
-    final isLink = tag == 'a' || tag == 'area' || tag == 'link';
+    if (tag == 'link') {
+      // A chapter may only bring in local stylesheets; preloads, icons and
+      // remote styles are dropped.
+      final rel = (element.attributes['rel'] ?? '')
+          .toLowerCase()
+          .split(RegExp(r'\s+'));
+      if (!rel.contains('stylesheet')) {
+        element.remove();
+        continue;
+      }
+      final rewritten = rewrite(
+        element.attributes['href'],
+        isStylesheet: true,
+      );
+      if (rewritten == null) {
+        element.remove();
+      } else {
+        element.attributes['href'] = rewritten;
+      }
+      continue;
+    }
 
-    const urlAttributes = {'src', 'href', 'xlink:href', 'poster', 'data'};
+    final isLink = tag == 'a' || tag == 'area';
+    final allowData = const {
+      'img',
+      'image',
+      'source',
+      'video',
+      'audio',
+      'track',
+      'input',
+    }.contains(tag);
+
+    const urlAttributes = {
+      'src',
+      'href',
+      'xlink:href',
+      'poster',
+      'data',
+      'background',
+    };
     for (final key in element.attributes.keys.toList()) {
       final attribute = _attributeName(key);
       if (!urlAttributes.contains(attribute.toLowerCase())) continue;
-      final rewritten = rewrite(element.attributes[key], isLink: isLink);
+      final rewritten = rewrite(
+        element.attributes[key],
+        isLink: isLink,
+        allowData: allowData,
+      );
       if (rewritten == null) {
         element.attributes.remove(key);
         if (tag == 'img' || tag == 'image') {
@@ -150,27 +225,30 @@ ChapterContent rewriteChapterHtml(
   }
 
   for (final styleElement in document.querySelectorAll('style')) {
-    final css = styleElement.text;
-    if (css.contains('url(')) {
-      styleElement.text = _rewriteCssUrls(
-        css,
-        chapterPath: chapterPath,
-        bookRoot: bookRoot,
-        resolver: resolver,
-        missing: missing,
-      );
-    }
+    final css = _stripRemoteImports(styleElement.text);
+    styleElement.text = css.contains('url(')
+        ? _rewriteCssUrls(
+            css,
+            chapterPath: chapterPath,
+            bookRoot: bookRoot,
+            resolver: resolver,
+            missing: missing,
+          )
+        : css;
   }
 
   final headParts = <String>[];
   if (head != null) {
     for (final child in head.children.toList()) {
       final tag = child.localName?.toLowerCase() ?? '';
-      if (tag == 'base' || tag == 'script') continue;
-      if (tag == 'meta') continue;
       if (tag == 'link') {
         final rel = (child.attributes['rel'] ?? '').toLowerCase();
-        if (!rel.contains('stylesheet')) continue;
+        final href = child.attributes['href'];
+        if (!rel.contains('stylesheet') ||
+            href == null ||
+            !href.startsWith('file:')) {
+          continue;
+        }
       }
       if (tag == 'style' || tag == 'link' || tag == 'title') {
         headParts.add(child.outerHtml);
@@ -225,14 +303,15 @@ String _rewriteCssUrls(
   return css.replaceAllMapped(pattern, (match) {
     final raw = match.group(1) ?? match.group(2) ?? match.group(3);
     if (raw == null || raw.isEmpty) return match.group(0)!;
-    if (raw.startsWith('data:') ||
-        raw.startsWith('http:') ||
-        raw.startsWith('https:') ||
-        raw.startsWith('#')) {
+    final lower = raw.toLowerCase();
+    if (lower.startsWith('data:') || raw.startsWith('#')) {
       return match.group(0)!;
     }
     final resolved = resolver.resolve(raw, basePath: chapterPath);
-    if (resolved.isExternal) return match.group(0)!;
+    if (resolved.isExternal) {
+      // No remote images, fonts or tracking pixels from book CSS.
+      return 'url("")';
+    }
     if (resolved.path == null) {
       missing.add(resolved.normalizedPath ?? raw);
       return 'url("")';
@@ -240,4 +319,13 @@ String _rewriteCssUrls(
     final uri = resolver.fileUri(p.join(bookRoot, resolved.path!));
     return 'url("$uri")';
   });
+}
+
+/// Removes `@import` rules that would fetch a remote stylesheet.
+String _stripRemoteImports(String css) {
+  final pattern = RegExp(
+    r'''@import\s+(?:url\(\s*)?["']?(?:https?:)?//[^;]*;?''',
+    caseSensitive: false,
+  );
+  return css.replaceAll(pattern, '');
 }

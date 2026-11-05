@@ -121,13 +121,78 @@ void main() {
       expect(c.missingResources, contains('OEBPS/images/gone.png'));
     });
 
-    test('keeps data and external image URLs untouched', () {
+    test('keeps data URLs but drops external image URLs', () {
       final c = rewrite(
         '<img src="data:image/png;base64,AAAA"/>'
         '<img src="https://example.com/pic.png"/>',
       );
       expect(c.bodyHtml, contains('src="data:image/png;base64,AAAA"'));
-      expect(c.bodyHtml, contains('src="https://example.com/pic.png"'));
+      expect(c.bodyHtml, isNot(contains('https://example.com/pic.png')));
+    });
+
+    test('drops frames, objects, forms, meta refresh and base', () {
+      final c = rewrite(
+        '<iframe srcdoc="<script>alert(1)</script>"></iframe>'
+        '<iframe src="https://example.com/frame"></iframe>'
+        '<object data="https://example.com/a.swf"></object>'
+        '<embed src="https://example.com/a.swf">'
+        '<form action="https://example.com/post">'
+        '<button formaction="https://example.com/post">go</button>'
+        '</form>'
+        '<meta http-equiv="refresh" content="0;url=https://example.com">'
+        '<base href="https://example.com/">'
+        '<p>safe text</p>',
+      );
+      expect(c.bodyHtml, contains('safe text'));
+      expect(c.bodyHtml, isNot(contains('iframe')));
+      expect(c.bodyHtml, isNot(contains('srcdoc')));
+      expect(c.bodyHtml, isNot(contains('object')));
+      expect(c.bodyHtml, isNot(contains('embed')));
+      expect(c.bodyHtml, isNot(contains('form')));
+      expect(c.bodyHtml, isNot(contains('formaction')));
+      expect(c.bodyHtml, isNot(contains('http-equiv')));
+      expect(c.bodyHtml, isNot(contains('example.com')));
+      expect(c.headHtml, isNot(contains('example.com')));
+    });
+
+    test('removes srcdoc, formaction and ping attributes', () {
+      final c = rewrite(
+        '<p srcdoc="x" formaction="https://example.com" ping="https://e.com">'
+        'text</p>',
+      );
+      expect(c.bodyHtml, isNot(contains('srcdoc')));
+      expect(c.bodyHtml, isNot(contains('formaction')));
+      expect(c.bodyHtml, isNot(contains('ping')));
+      expect(c.bodyHtml, contains('text'));
+    });
+
+    test('keeps local stylesheet links and drops external ones', () {
+      final c = rewrite(
+        '<html><head>'
+        '<link rel="stylesheet" href="../style/book.css"/>'
+        '<link rel="stylesheet" href="https://example.com/evil.css"/>'
+        '<link rel="preload" href="../images/pic.jpg"/>'
+        '</head><body><p>x</p></body></html>',
+      );
+      expect(c.headHtml, contains('file:///cache/book/OEBPS/style/book.css'));
+      expect(c.headHtml, isNot(contains('example.com')));
+      expect(c.headHtml, isNot(contains('preload')));
+    });
+
+    test('strips remote urls and imports from book CSS', () {
+      final c = rewrite(
+        '<html><head><style>'
+        '@import url("https://example.com/evil.css");'
+        '@import "https://example.com/evil2.css";'
+        'body{background:url(https://example.com/tracker.png)}'
+        '.x{background:url(data:image/png;base64,AAAA)}'
+        '</style></head><body>'
+        '<p style="background:url(https://example.com/track2.png)">x</p>'
+        '</body></html>',
+      );
+      expect(c.headHtml, isNot(contains('https://example.com')));
+      expect(c.bodyHtml, isNot(contains('https://example.com')));
+      expect(c.headHtml, contains('data:image/png;base64,AAAA'));
     });
 
     test('rewrites CSS urls in style attributes and style blocks', () {

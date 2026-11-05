@@ -13,6 +13,7 @@ import '../epub/href_resolver.dart';
 import '../models/app_settings.dart';
 import '../utils/theme_utils.dart';
 import 'reader_content_controller.dart';
+import 'webview_security.dart';
 
 /// Event reported by the WebView while the reader moves through a book.
 class ReaderProgressEvent {
@@ -86,6 +87,7 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
   InAppWebViewController? _controller;
   String? _shellHtml;
   bool _shellReady = false;
+  bool _shellLoaded = false;
   bool _loadingChapter = false;
   int _currentChapter = 0;
   int _requestedChapter = -1;
@@ -170,6 +172,7 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta http-equiv="Content-Security-Policy" content="${readerContentSecurityPolicy(js)}">
 <style>$css</style>
 </head>
 <body>
@@ -187,6 +190,7 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
   }
 
   Future<void> _onLoadStop(InAppWebViewController controller) async {
+    _shellLoaded = true;
     _shellReady = true;
     await controller.evaluateJavascript(
       source: 'folio.init(${jsonEncode(_settingsJson())});',
@@ -534,21 +538,7 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
         encoding: 'utf-8',
         baseUrl: WebUri(Uri.directory(widget.document.rootDir).toString()),
       ),
-      initialSettings: InAppWebViewSettings(
-        javaScriptEnabled: true,
-        transparentBackground: true,
-        allowFileAccess: true,
-        allowContentAccess: true,
-        allowFileAccessFromFileURLs: true,
-        allowUniversalAccessFromFileURLs: true,
-        supportZoom: false,
-        verticalScrollBarEnabled: false,
-        horizontalScrollBarEnabled: false,
-        disableVerticalScroll: false,
-        disableHorizontalScroll: false,
-        mediaPlaybackRequiresUserGesture: true,
-        isInspectable: kDebugMode,
-      ),
+      initialSettings: readerWebViewSettings(inspectable: kDebugMode),
       onWebViewCreated: (controller) {
         _controller = controller;
         controller.addJavaScriptHandler(
@@ -561,6 +551,15 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
         );
       },
       onLoadStop: (controller, _) => _onLoadStop(controller),
+      shouldOverrideUrlLoading: (controller, action) async {
+        final allowed = readerAllowsNavigation(
+          shellLoaded: _shellLoaded,
+          url: action.request.url,
+        );
+        return allowed
+            ? NavigationActionPolicy.ALLOW
+            : NavigationActionPolicy.CANCEL;
+      },
       onReceivedError: (controller, request, error) {
         // The shell is the only document navigated by the WebView; chapter
         // images report their own failures through JS.
