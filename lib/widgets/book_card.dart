@@ -43,8 +43,17 @@ class _BookCardState extends ConsumerState<BookCard> {
   }
 
   Future<void> _loadCover() async {
+    final bookPath = widget.book.path;
+    final modified = widget.book.lastModifiedMs;
     final path = await ref.read(coverServiceProvider).thumbnailFor(widget.book);
-    if (!mounted || path == null) return;
+    // The list can be filtered while a cover is being generated. A card whose
+    // state is reused for another book must not paint the old book's cover.
+    if (!mounted ||
+        path == null ||
+        widget.book.path != bookPath ||
+        widget.book.lastModifiedMs != modified) {
+      return;
+    }
     setState(() => _thumbnail = path);
   }
 
@@ -52,7 +61,7 @@ class _BookCardState extends ConsumerState<BookCard> {
   Widget build(BuildContext context) {
     final book = widget.book;
     final scheme = Theme.of(context).colorScheme;
-    final hasProgress = book.lastProgress > 0.01;
+    final hasProgress = book.overallProgress > 0.01;
 
     return GestureDetector(
       onTap: widget.onTap,
@@ -93,7 +102,7 @@ class _BookCardState extends ConsumerState<BookCard> {
             // ── Progress bar (thin strip) ────────────────────────────────
             if (hasProgress)
               LinearProgressIndicator(
-                value: book.lastProgress,
+                value: book.overallProgress,
                 minHeight: 3,
                 backgroundColor: scheme.onSurface.withValues(alpha: 0.08),
                 valueColor: const AlwaysStoppedAnimation<Color>(kAccentColor),

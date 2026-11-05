@@ -115,6 +115,7 @@ class LibraryNotifier extends Notifier<LibraryState> {
         return book.copyWith(
           lastChapterIndex: position.chapterIndex,
           lastProgress: position.progress,
+          overallProgress: position.overallProgress,
         );
       }).toList();
     } catch (error) {
@@ -128,13 +129,15 @@ class LibraryNotifier extends Notifier<LibraryState> {
   void updateReadingProgress(
     String bookPath,
     int chapterIndex,
-    double progress,
-  ) {
+    double progress, {
+    double? overallProgress,
+  }) {
     final updated = state.books.map((b) {
       if (b.path == bookPath) {
         return b.copyWith(
           lastChapterIndex: chapterIndex,
           lastProgress: progress,
+          overallProgress: overallProgress,
         );
       }
       return b;

@@ -75,6 +75,31 @@ void main() {
     expect(await store.loadAll(), isEmpty);
   });
 
+  test('saves overall book progress alongside the chapter position', () async {
+    await store.save(
+      '/books/one.epub',
+      const ReadingPosition(
+        chapterIndex: 3,
+        progress: 0.5,
+        overallProgress: 0.72,
+      ),
+    );
+
+    final position = await store.load('/books/one.epub');
+    expect(position?.overallProgress, 0.72);
+  });
+
+  test('old positions without overall progress still load', () async {
+    SharedPreferences.setMockInitialValues({
+      'folio_reading_position:/books/old.epub':
+          '{"chapterIndex":1,"progress":0.4}',
+    });
+
+    final position = await store.load('/books/old.epub');
+    expect(position?.progress, 0.4);
+    expect(position?.overallProgress, 0);
+  });
+
   test('bad numeric values are clamped to the supported position', () async {
     final position = ReadingPosition.fromJson(const {
       'chapterIndex': -3,

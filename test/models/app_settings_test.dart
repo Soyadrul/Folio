@@ -106,6 +106,38 @@ void main() {
     expect(settings.textAlign, TextAlign.justify);
   });
 
+  test('settings that differ in any field are not equal', () {
+    const settings = AppSettings();
+    expect(settings, const AppSettings());
+    expect(settings.hashCode, const AppSettings().hashCode);
+    final variants = [
+      settings.copyWith(fontSize: 19),
+      settings.copyWith(fontFamily: 'Lora'),
+      settings.copyWith(lineHeight: 1.6),
+      settings.copyWith(textAlign: TextAlign.left),
+      settings.copyWith(hyphenation: false),
+      settings.copyWith(hyphenationLanguage: 'it'),
+      settings.copyWith(marginHorizontal: 20),
+      settings.copyWith(readingMode: ReadingMode.dark),
+      settings.copyWith(keepScreenOn: false),
+      settings.copyWith(showProgressBar: false),
+      settings.copyWith(readerMode: ReaderMode.scroll),
+      settings.copyWith(volumeButtonsTurnPages: false),
+      settings.copyWith(invertVolumeButtons: true),
+      settings.copyWith(tapZones: false),
+      settings.copyWith(tapZoneWidth: 40),
+      settings.copyWith(swipeToTurnPage: false),
+      settings.copyWith(pageAnimation: false),
+      settings.copyWith(autoScrollSpeed: 80),
+      settings.copyWith(tapToStartStop: false),
+      settings.copyWith(volumeButtonsChangeSpeed: false),
+      settings.copyWith(scrollAutoStart: true),
+    ];
+    for (final variant in variants) {
+      expect(variant, isNot(settings));
+    }
+  });
+
   test('copyWith changes only the requested fields', () {
     const original = AppSettings();
     final changed = original.copyWith(

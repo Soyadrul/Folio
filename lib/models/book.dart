@@ -15,6 +15,13 @@ class Book {
   /// Reading progress within the last chapter (0.0 – 1.0).
   final double lastProgress;
 
+  /// Reading progress through the whole book (0.0 – 1.0).
+  ///
+  /// [lastProgress] only describes the current chapter, so showing it on a
+  /// library card makes the bar restart at every chapter. This value is
+  /// persisted alongside the reading position and is what the card displays.
+  final double overallProgress;
+
   /// File modification time when the book was scanned. Used to notice a
   /// replaced file after a refresh without re-reading every cover.
   final int lastModifiedMs;
@@ -25,6 +32,7 @@ class Book {
     required this.author,
     this.lastChapterIndex = 0,
     this.lastProgress = 0.0,
+    this.overallProgress = 0.0,
     this.lastModifiedMs = 0,
   });
 
@@ -35,6 +43,7 @@ class Book {
     String? author,
     int? lastChapterIndex,
     double? lastProgress,
+    double? overallProgress,
     int? lastModifiedMs,
   }) {
     return Book(
@@ -43,6 +52,7 @@ class Book {
       author: author ?? this.author,
       lastChapterIndex: lastChapterIndex ?? this.lastChapterIndex,
       lastProgress: lastProgress ?? this.lastProgress,
+      overallProgress: overallProgress ?? this.overallProgress,
       lastModifiedMs: lastModifiedMs ?? this.lastModifiedMs,
     );
   }

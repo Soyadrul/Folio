@@ -175,6 +175,58 @@ class AppSettings {
     );
   }
 
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is AppSettings &&
+        other.fontSize == fontSize &&
+        other.fontFamily == fontFamily &&
+        other.lineHeight == lineHeight &&
+        other.textAlign == textAlign &&
+        other.hyphenation == hyphenation &&
+        other.hyphenationLanguage == hyphenationLanguage &&
+        other.marginHorizontal == marginHorizontal &&
+        other.readingMode == readingMode &&
+        other.keepScreenOn == keepScreenOn &&
+        other.showProgressBar == showProgressBar &&
+        other.readerMode == readerMode &&
+        other.volumeButtonsTurnPages == volumeButtonsTurnPages &&
+        other.invertVolumeButtons == invertVolumeButtons &&
+        other.tapZones == tapZones &&
+        other.tapZoneWidth == tapZoneWidth &&
+        other.swipeToTurnPage == swipeToTurnPage &&
+        other.pageAnimation == pageAnimation &&
+        other.autoScrollSpeed == autoScrollSpeed &&
+        other.tapToStartStop == tapToStartStop &&
+        other.volumeButtonsChangeSpeed == volumeButtonsChangeSpeed &&
+        other.scrollAutoStart == scrollAutoStart;
+  }
+
+  @override
+  int get hashCode => Object.hashAll([
+    fontSize,
+    fontFamily,
+    lineHeight,
+    textAlign,
+    hyphenation,
+    hyphenationLanguage,
+    marginHorizontal,
+    readingMode,
+    keepScreenOn,
+    showProgressBar,
+    readerMode,
+    volumeButtonsTurnPages,
+    invertVolumeButtons,
+    tapZones,
+    tapZoneWidth,
+    swipeToTurnPage,
+    pageAnimation,
+    autoScrollSpeed,
+    tapToStartStop,
+    volumeButtonsChangeSpeed,
+    scrollAutoStart,
+  ]);
+
   // ── Serialisation ─────────────────────────────────────────────────────────
 
   Map<String, dynamic> toJson() => {

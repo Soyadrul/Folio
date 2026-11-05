@@ -86,15 +86,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   // ── Navigation ─────────────────────────────────────────────────────────
 
   void _openBook(Book book) {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => ReaderScreen(book: book)),
-    );
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => ReaderScreen(book: book)));
   }
 
   void _openSettings() {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const SettingsScreen()),
-    );
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const SettingsScreen()));
   }
 
   // ── Build ──────────────────────────────────────────────────────────────
@@ -129,8 +129,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       pinned: true,
       expandedHeight: 130,
       flexibleSpace: FlexibleSpaceBar(
-        titlePadding:
-            const EdgeInsets.only(left: 20, bottom: 14),
+        titlePadding: const EdgeInsets.only(left: 20, bottom: 14),
         title: Text(
           'Folio',
           style: GoogleFonts.playfairDisplay(
@@ -210,8 +209,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 : null,
             filled: true,
             fillColor: Theme.of(context).cardTheme.color,
-            contentPadding:
-                const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
+            contentPadding: const EdgeInsets.symmetric(
+              vertical: 10,
+              horizontal: 16,
+            ),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: BorderSide.none,
@@ -264,8 +265,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               : 'Try a different search term.',
           action: _searchQuery.isEmpty
               ? TextButton.icon(
-                  onPressed: () =>
-                      ref.read(libraryProvider.notifier).refresh(),
+                  onPressed: () => ref.read(libraryProvider.notifier).refresh(),
                   icon: const Icon(Icons.refresh_rounded),
                   label: const Text('Refresh'),
                 )
@@ -286,6 +286,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         ),
         delegate: SliverChildBuilderDelegate(
           (context, index) => BookCard(
+            key: ValueKey(books[index].path),
             book: books[index],
             onTap: () => _openBook(books[index]),
           ),
@@ -335,14 +336,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               style: FilledButton.styleFrom(
                 backgroundColor: kAccentColor,
                 padding: const EdgeInsets.symmetric(
-                    horizontal: 24, vertical: 14),
+                  horizontal: 24,
+                  vertical: 14,
+                ),
               ),
               onPressed: _pickFolder,
               icon: const Icon(Icons.folder_open_rounded),
               label: Text(
                 'Choose Library Folder',
                 style: GoogleFonts.lato(
-                    fontSize: 15, fontWeight: FontWeight.w600),
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
           ],
@@ -365,13 +370,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           children: [
             Icon(icon, size: 56, color: kAccentColor.withValues(alpha: 0.6)),
             const SizedBox(height: 16),
-            Text(title,
-                style: Theme.of(context).textTheme.titleMedium,
-                textAlign: TextAlign.center),
+            Text(
+              title,
+              style: Theme.of(context).textTheme.titleMedium,
+              textAlign: TextAlign.center,
+            ),
             const SizedBox(height: 8),
-            Text(subtitle,
-                style: Theme.of(context).textTheme.bodyMedium,
-                textAlign: TextAlign.center),
+            Text(
+              subtitle,
+              style: Theme.of(context).textTheme.bodyMedium,
+              textAlign: TextAlign.center,
+            ),
             if (action != null) ...[const SizedBox(height: 16), action],
           ],
         ),

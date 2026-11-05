@@ -127,6 +127,8 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
       );
       return;
     }
+    if (oldWidget.settings == widget.settings) return;
+
     final modeChanged =
         oldWidget.settings.readerMode != widget.settings.readerMode;
     final typographyChanged =
@@ -135,20 +137,28 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
         oldWidget.settings.fontFamily != widget.settings.fontFamily ||
         oldWidget.settings.textAlign != widget.settings.textAlign ||
         oldWidget.settings.hyphenation != widget.settings.hyphenation ||
-        oldWidget.settings.marginHorizontal !=
-            widget.settings.marginHorizontal ||
         oldWidget.settings.readingMode != widget.settings.readingMode;
+    final marginChanged =
+        oldWidget.settings.marginHorizontal != widget.settings.marginHorizontal;
 
-    if (modeChanged || typographyChanged) {
-      unawaited(_applySettingsAndRestore(modeChanged));
-    } else if (oldWidget.settings.autoScrollSpeed !=
-        widget.settings.autoScrollSpeed) {
-      setAutoScrollSpeed(widget.settings.autoScrollSpeed.round());
-    }
+    unawaited(
+      _applySettingsAndRestore(
+        modeChanged: modeChanged,
+        reflow: typographyChanged || marginChanged,
+        marginChanged: marginChanged,
+      ),
+    );
   }
 
-  Future<void> _applySettingsAndRestore(bool modeChanged) async {
+  Future<void> _applySettingsAndRestore({
+    required bool modeChanged,
+    required bool reflow,
+    required bool marginChanged,
+  }) async {
     await _ensureFontFaces();
+    // Every setting lives in the same object, so pushing the whole settings
+    // object also applies tap zones, swipe, page animation and auto-scroll
+    // options without reopening the book.
     await _applySettingsToPage();
     if (modeChanged) {
       // Multi-column and scrolling layouts need a fresh chapter document.
@@ -157,7 +167,18 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
         progress: _lastProgress,
         element: _lastElement,
       );
-    } else {
+      return;
+    }
+    if (!reflow) return;
+    await _goToProgress(_lastProgress, _lastElement);
+    if (marginChanged) {
+      // Margins are Flutter padding, so the platform view receives its new
+      // width only after the next frame. Restore the position once more when
+      // the WebView has actually resized, otherwise the page count is stale.
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+      if (!mounted) return;
       await _goToProgress(_lastProgress, _lastElement);
     }
   }

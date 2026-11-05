@@ -66,6 +66,7 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
   bool _volumeKeysEnabled = false;
 
   Timer? _saveTimer;
+  Timer? _runtimeErrorTimer;
   int _lastSavedMs = 0;
 
   bool get _usesWebView => Platform.isAndroid;
@@ -96,6 +97,7 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _saveTimer?.cancel();
+    _runtimeErrorTimer?.cancel();
     _persistPosition(force: true);
     VolumeKeys.setHandler(null);
     if (_volumeKeysEnabled) VolumeKeys.setEnabled(false);
@@ -214,6 +216,9 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
 
   void _onProgress(ReaderProgressEvent event) {
     if (!mounted) return;
+    // A progress event means the last navigation worked, so any transient
+    // error from the previous one is no longer relevant.
+    _clearRuntimeError();
     setState(() {
       _chapterIndex = event.chapterIndex;
       _chapterProgress = event.progress;
@@ -222,6 +227,25 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
       _pages = event.pages;
     });
     _scheduleSave();
+  }
+
+  /// Shows a transient error message and clears it automatically.
+  void _showRuntimeError(String message) {
+    _runtimeErrorTimer?.cancel();
+    setState(() => _runtimeError = message);
+    _runtimeErrorTimer = Timer(const Duration(seconds: 4), () {
+      if (!mounted) return;
+      if (_runtimeError == message) {
+        setState(() => _runtimeError = null);
+      }
+    });
+  }
+
+  void _clearRuntimeError() {
+    _runtimeErrorTimer?.cancel();
+    _runtimeErrorTimer = null;
+    if (_runtimeError == null) return;
+    setState(() => _runtimeError = null);
   }
 
   void _scheduleSave() {
@@ -242,10 +266,12 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
     final now = DateTime.now().millisecondsSinceEpoch;
     if (!force && now - _lastSavedMs < 500) return;
     _lastSavedMs = now;
+    final overall = _overallProgress;
     _library.updateReadingProgress(
       widget.book.path,
       _chapterIndex,
       _chapterProgress,
+      overallProgress: overall,
     );
     unawaited(
       _positions
@@ -255,6 +281,7 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
               chapterIndex: _chapterIndex,
               progress: _chapterProgress,
               element: _element,
+              overallProgress: overall,
             ),
           )
           .catchError((Object error) {
@@ -450,7 +477,7 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
       },
       onError: (message) {
         if (!mounted) return;
-        setState(() => _runtimeError = message);
+        _showRuntimeError(message);
       },
     );
   }

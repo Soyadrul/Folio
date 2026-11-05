@@ -124,6 +124,36 @@ void main() {
     );
     expect(saved.progress, closeTo(0.42, 0.0001));
     expect(saved.element, 'start');
+    expect(saved.overallProgress, greaterThan(0));
+  });
+
+  testWidgets('a runtime error banner disappears by itself', (tester) async {
+    final book = Book(path: epub.path, title: 'Old Book', author: 'Jane Doe');
+    final loader = EpubLoader(cacheRoot: Directory(p.join(tmp.path, 'cache')));
+
+    await tester.runAsync(() async {
+      await tester.pumpWidget(
+        ProviderScope(
+          child: MaterialApp(
+            theme: buildLightTheme(),
+            home: ReaderScreen(book: book, loader: loader),
+          ),
+        ),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 1500));
+    });
+    await tester.pump();
+
+    final state = tester.state<ReaderScreenState>(find.byType(ReaderScreen));
+    state.createCallbacks().onError!('This link points outside the book.');
+    await tester.pump();
+
+    expect(find.text('This link points outside the book.'), findsOneWidget);
+
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pump();
+
+    expect(find.text('This link points outside the book.'), findsNothing);
   });
 }
 

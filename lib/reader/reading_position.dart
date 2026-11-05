@@ -12,24 +12,35 @@ class ReadingPosition {
     required this.chapterIndex,
     required this.progress,
     this.element,
+    this.overallProgress = 0,
   });
 
   final int chapterIndex;
+
+  /// Position inside the current chapter (0.0 – 1.0).
   final double progress;
+
   final String? element;
+
+  /// Position through the whole book (0.0 – 1.0). Older saved positions do
+  /// not have this field and default to zero.
+  final double overallProgress;
 
   Map<String, dynamic> toJson() => {
     'chapterIndex': chapterIndex,
     'progress': progress,
     if (element != null && element!.isNotEmpty) 'element': element,
+    if (overallProgress > 0) 'overallProgress': overallProgress,
   };
 
   factory ReadingPosition.fromJson(Map<String, dynamic> json) {
     final rawChapter = json['chapterIndex'];
     final rawProgress = json['progress'];
     final rawElement = json['element'];
+    final rawOverall = json['overallProgress'];
     final chapter = rawChapter is num ? rawChapter.toInt() : 0;
     final progress = rawProgress is num ? rawProgress.toDouble() : 0.0;
+    final overall = rawOverall is num ? rawOverall.toDouble() : 0.0;
     return ReadingPosition(
       chapterIndex: chapter < 0 ? 0 : chapter,
       progress: progress.isNaN || progress.isInfinite
@@ -38,6 +49,9 @@ class ReadingPosition {
       element: rawElement is String && rawElement.isNotEmpty
           ? rawElement
           : null,
+      overallProgress: overall.isNaN || overall.isInfinite
+          ? 0
+          : overall.clamp(0.0, 1.0).toDouble(),
     );
   }
 
@@ -47,15 +61,17 @@ class ReadingPosition {
       (other is ReadingPosition &&
           other.chapterIndex == chapterIndex &&
           other.progress == progress &&
-          other.element == element);
+          other.element == element &&
+          other.overallProgress == overallProgress);
 
   @override
-  int get hashCode => Object.hash(chapterIndex, progress, element);
+  int get hashCode =>
+      Object.hash(chapterIndex, progress, element, overallProgress);
 
   @override
   String toString() =>
       'ReadingPosition(chapter: $chapterIndex, progress: $progress, '
-      'element: $element)';
+      'element: $element, overall: $overallProgress)';
 }
 
 /// Persists one [ReadingPosition] per book in [SharedPreferences].
