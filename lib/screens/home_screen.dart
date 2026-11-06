@@ -52,18 +52,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   // ── Folder picker ──────────────────────────────────────────────────────
 
+  /// Checks storage access and asks for it when Android has not granted it.
+  Future<bool> _ensureStoragePermission() async {
+    if (!Platform.isAndroid) return true;
+    if (await Permission.manageExternalStorage.isGranted) return true;
+    if (await Permission.storage.isGranted) return true;
+    final status = await Permission.manageExternalStorage.request();
+    if (status.isGranted) return true;
+    return Permission.storage.request().then((s) => s.isGranted);
+  }
+
   Future<void> _pickFolder() async {
-    // On Android we need storage permission; on Linux it is not required.
-    if (Platform.isAndroid) {
-      final status = await Permission.manageExternalStorage.request();
-      if (!status.isGranted) {
-        // Fall back to READ_EXTERNAL_STORAGE for older Android.
-        final readStatus = await Permission.storage.request();
-        if (!readStatus.isGranted && mounted) {
-          _showPermissionDeniedSnackbar();
-          return;
-        }
-      }
+    if (!await _ensureStoragePermission()) {
+      if (mounted) _showPermissionDeniedSnackbar();
+      return;
     }
 
     final path = await FilePicker.platform.getDirectoryPath(
@@ -71,6 +73,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
     if (path != null && mounted) {
       await ref.read(libraryProvider.notifier).scanFolder(path);
+    }
+  }
+
+  Future<void> _grantPermissionAndRescan() async {
+    if (!await _ensureStoragePermission()) {
+      if (mounted) _showPermissionDeniedSnackbar();
+      return;
+    }
+    if (!mounted) return;
+    final folder = ref.read(libraryProvider).folderPath;
+    if (folder != null) {
+      await ref.read(libraryProvider.notifier).refresh();
+    } else {
+      await _pickFolder();
     }
   }
 
@@ -116,6 +132,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         slivers: [
           _buildAppBar(library),
           if (library.folderPath != null) _buildSearchBar(),
+          if (library.warningMessage != null) _buildWarning(library),
           _buildBody(library, filteredBooks),
         ],
       ),
@@ -225,6 +242,44 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   // ── Main content ────────────────────────────────────────────────────────
 
+  Widget _buildWarning(LibraryState library) {
+    return SliverToBoxAdapter(
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: kAccentColor.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: kAccentColor.withValues(alpha: 0.25)),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Icon(
+              Icons.warning_amber_rounded,
+              size: 18,
+              color: kAccentColor,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                library.warningMessage!,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(height: 1.35),
+              ),
+            ),
+            if (library.needsPermission)
+              TextButton(
+                onPressed: _grantPermissionAndRescan,
+                child: const Text('Grant'),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildBody(LibraryState library, List<Book> books) {
     // ① Loading
     if (library.isLoading) {
@@ -241,9 +296,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           title: 'Could not load books',
           subtitle: library.errorMessage!,
           action: TextButton.icon(
-            onPressed: _pickFolder,
-            icon: const Icon(Icons.folder_open_rounded),
-            label: const Text('Choose folder'),
+            onPressed: library.needsPermission
+                ? _grantPermissionAndRescan
+                : _pickFolder,
+            icon: Icon(
+              library.needsPermission
+                  ? Icons.lock_open_rounded
+                  : Icons.folder_open_rounded,
+            ),
+            label: Text(
+              library.needsPermission ? 'Grant permission' : 'Choose folder',
+            ),
           ),
         ),
       );

@@ -1,5 +1,10 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/book.dart';
@@ -8,6 +13,10 @@ import '../utils/book_scanner.dart';
 
 // ── Persistence keys ───────────────────────────────────────────────────────
 const _kLibraryFolderKey = 'folio_library_folder';
+
+/// The function used to scan a folder. Injectable so tests can control timing.
+typedef LibraryScanner =
+    Future<LibraryScan> Function(String path, {String? cachePath});
 
 // ── State ─────────────────────────────────────────────────────────────────
 
@@ -21,14 +30,22 @@ class LibraryState {
   /// True while a scan is running.
   final bool isLoading;
 
-  /// Non-null when the last scan encountered an error.
+  /// Non-null when the last scan could not produce a library.
   final String? errorMessage;
+
+  /// A non-fatal problem, e.g. some sub-folders that could not be read.
+  final String? warningMessage;
+
+  /// True when Android storage permission is required before scanning.
+  final bool needsPermission;
 
   const LibraryState({
     this.folderPath,
     this.books = const [],
     this.isLoading = false,
     this.errorMessage,
+    this.warningMessage,
+    this.needsPermission = false,
   });
 
   LibraryState copyWith({
@@ -36,13 +53,20 @@ class LibraryState {
     List<Book>? books,
     bool? isLoading,
     String? errorMessage,
+    String? warningMessage,
     bool clearError = false,
+    bool clearWarning = false,
+    bool? needsPermission,
   }) {
     return LibraryState(
       folderPath: folderPath ?? this.folderPath,
       books: books ?? this.books,
       isLoading: isLoading ?? this.isLoading,
       errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
+      warningMessage: clearWarning
+          ? null
+          : (warningMessage ?? this.warningMessage),
+      needsPermission: needsPermission ?? this.needsPermission,
     );
   }
 }
@@ -54,6 +78,16 @@ final libraryProvider = NotifierProvider<LibraryNotifier, LibraryState>(() {
 });
 
 class LibraryNotifier extends Notifier<LibraryState> {
+  LibraryNotifier({LibraryScanner? scanner})
+    : _scanner = scanner ?? scanFolderForBooks;
+
+  final LibraryScanner _scanner;
+
+  /// Every scan gets a token; only the newest one may publish its result.
+  int _scanToken = 0;
+  String? _cachePath;
+  bool _cachePathResolved = false;
+
   @override
   LibraryState build() {
     // Load saved folder on initialization
@@ -63,28 +97,97 @@ class LibraryNotifier extends Notifier<LibraryState> {
     return const LibraryState();
   }
 
+  Future<String?> _metadataCachePath() async {
+    if (_cachePathResolved) return _cachePath;
+    _cachePathResolved = true;
+    try {
+      final support = await getApplicationSupportDirectory();
+      _cachePath = p.join(support.path, 'library_metadata.json');
+    } catch (_) {
+      // Without a support directory scanning still works, just uncached.
+      _cachePath = null;
+    }
+    return _cachePath;
+  }
+
+  Future<bool> _hasStoragePermission() async {
+    if (!Platform.isAndroid) return true;
+    if (await Permission.manageExternalStorage.isGranted) return true;
+    return Permission.storage.isGranted;
+  }
+
   /// Restores the previously selected folder and re-scans it on startup.
   Future<void> _loadSavedFolder() async {
     final prefs = await SharedPreferences.getInstance();
     final saved = prefs.getString(_kLibraryFolderKey);
-    if (saved != null) {
-      await scanFolder(saved);
-    }
+    if (saved == null) return;
+    // A folder picked by the user while this was loading wins.
+    if (state.folderPath != null) return;
+    state = state.copyWith(folderPath: saved);
+    await scanFolder(saved, persist: false);
   }
 
   /// Stores [path] as the library folder and scans it for books.
-  Future<void> scanFolder(String path) async {
-    // Save immediately so the choice is remembered across restarts.
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_kLibraryFolderKey, path);
+  ///
+  /// The folder is validated and (when [persist] is true) saved only once it
+  /// exists, so a bad pick is not remembered. Overlapping scans are supported:
+  /// a superseded scan never publishes its result.
+  Future<void> scanFolder(String path, {bool persist = true}) async {
+    final token = ++_scanToken;
+    state = state.copyWith(
+      folderPath: path,
+      isLoading: true,
+      clearError: true,
+      clearWarning: true,
+      needsPermission: false,
+    );
 
-    state = state.copyWith(folderPath: path, isLoading: true, clearError: true);
+    if (Platform.isAndroid && !await _hasStoragePermission()) {
+      if (token != _scanToken) return;
+      state = state.copyWith(
+        isLoading: false,
+        needsPermission: true,
+        errorMessage: 'Storage permission is required to read your books.',
+      );
+      return;
+    }
+
+    if (!await Directory(path).exists()) {
+      if (token != _scanToken) return;
+      state = state.copyWith(
+        isLoading: false,
+        errorMessage: 'Folder not found: $path',
+      );
+      return;
+    }
+
+    if (persist) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_kLibraryFolderKey, path);
+    }
 
     try {
-      final scanned = await scanFolderForBooks(path);
-      final books = await _withSavedPositions(scanned);
-      state = state.copyWith(books: books, isLoading: false);
+      final scanned = await _scanner(
+        path,
+        cachePath: await _metadataCachePath(),
+      );
+      if (token != _scanToken) return;
+      final books = await _withSavedPositions(scanned.books);
+      if (token != _scanToken) return;
+      final permissionProblem = scanned.permissionDenied;
+      state = state.copyWith(
+        books: books,
+        isLoading: false,
+        needsPermission: permissionProblem,
+        errorMessage: permissionProblem && books.isEmpty
+            ? 'Storage permission is required to read your books.'
+            : null,
+        warningMessage: _warningFor(scanned),
+        clearError: !(permissionProblem && books.isEmpty),
+        clearWarning: false,
+      );
     } catch (e) {
+      if (token != _scanToken) return;
       state = state.copyWith(
         isLoading: false,
         errorMessage: 'Could not scan folder: $e',
@@ -96,7 +199,15 @@ class LibraryNotifier extends Notifier<LibraryState> {
   Future<void> refresh() async {
     final folder = state.folderPath;
     if (folder == null) return;
-    await scanFolder(folder);
+    await scanFolder(folder, persist: false);
+  }
+
+  String? _warningFor(LibraryScan scan) {
+    if (scan.skippedFolders == 0) return null;
+    final count = scan.skippedFolders;
+    final folders = count == 1 ? 'One folder' : '$count folders';
+    return '$folders could not be read and were skipped. '
+        'Check the storage permission or folder access.';
   }
 
   /// Merges positions persisted by the reader into freshly scanned books.

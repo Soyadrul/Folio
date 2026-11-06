@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:archive/archive.dart';
 import 'package:path/path.dart' as p;
@@ -18,14 +17,25 @@ class EpubMetadata {
 }
 
 Future<EpubMetadata> readEpubMetadata(String filePath) async {
-  final bytes = await File(filePath).readAsBytes();
+  // Read the ZIP directory and the two documents it points at instead of
+  // loading the whole book into memory. A large EPUB can be hundreds of MB.
+  final input = InputFileStream(filePath);
   final Archive archive;
   try {
-    archive = ZipDecoder().decodeBytes(bytes);
+    archive = ZipDecoder().decodeStream(input);
   } catch (e) {
+    await input.close();
     throw FormatException('Not a valid EPUB: $e');
   }
 
+  try {
+    return _readMetadata(archive, filePath);
+  } finally {
+    await input.close();
+  }
+}
+
+EpubMetadata _readMetadata(Archive archive, String filePath) {
   final entries = <String, ArchiveFile>{};
   for (final file in archive.files) {
     if (!file.isFile) continue;
