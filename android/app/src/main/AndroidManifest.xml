@@ -56,12 +56,21 @@
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="application/epub+zip" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" android:mimeType="application/epub+zip" />
+                <data android:scheme="file" android:mimeType="application/epub+zip" />
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
-                <data android:pathPattern=".*\\.epub" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <!-- Some file managers report EPUBs as octet-stream; the path
+                     pattern makes the extension match in that case. -->
+                <data
+                    android:scheme="content"
+                    android:mimeType="application/octet-stream"
+                    android:pathPattern=".*\\.epub" />
+                <data android:scheme="file" android:pathPattern=".*\\.epub" />
             </intent-filter>
         </activity>
 

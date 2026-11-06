@@ -13,13 +13,19 @@
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-
+import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path/path.dart' as p;
 
+import 'epub/epub_metadata.dart';
+import 'models/book.dart';
 import 'screens/home_screen.dart';
+import 'screens/reader_screen.dart';
+import 'utils/open_file_service.dart';
 import 'utils/theme_utils.dart';
 
 void main() async {
@@ -40,12 +46,75 @@ void main() async {
 }
 
 /// Root [MaterialApp] for the Folio ebook reader.
-class FolioApp extends StatelessWidget {
+class FolioApp extends StatefulWidget {
   const FolioApp({super.key});
+
+  @override
+  State<FolioApp> createState() => _FolioAppState();
+}
+
+class _FolioAppState extends State<FolioApp> {
+  final _navigatorKey = GlobalKey<NavigatorState>();
+  final _openFiles = OpenFileService();
+  final _pendingOpenFiles = <String>[];
+  StreamSubscription<String>? _openSubscription;
+  bool _ready = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _openSubscription = _openFiles.files.listen(_handleOpenFile);
+    // Start the channel after the first frame so a pending file has a
+    // navigator to open into.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _ready = true;
+      _openFiles.start();
+      if (_pendingOpenFiles.isNotEmpty) {
+        final pending = List<String>.from(_pendingOpenFiles);
+        _pendingOpenFiles.clear();
+        for (final path in pending) {
+          _handleOpenFile(path);
+        }
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _openSubscription?.cancel();
+    _openFiles.dispose();
+    super.dispose();
+  }
+
+  Future<void> _handleOpenFile(String path) async {
+    final navigator = _navigatorKey.currentState;
+    if (!_ready || navigator == null) {
+      _pendingOpenFiles.add(path);
+      return;
+    }
+    if (!File(path).existsSync()) return;
+
+    String title;
+    String author;
+    try {
+      final metadata = await readEpubMetadata(path);
+      title = metadata.title;
+      author = metadata.author;
+    } catch (_) {
+      title = p.basenameWithoutExtension(path);
+      author = 'Unknown Author';
+    }
+    if (!mounted) return;
+
+    final book = Book(path: path, title: title, author: author);
+    navigator.push(MaterialPageRoute(builder: (_) => ReaderScreen(book: book)));
+  }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: _navigatorKey,
       title: 'Folio',
       debugShowCheckedModeBanner: false,
       theme: buildLightTheme(),
