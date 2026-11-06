@@ -40,6 +40,7 @@
     suppressScroll: false,
     pending: null,
     missing: [],
+    history: [],
   };
 
   const viewport = () => document.getElementById('folio-viewport');
@@ -203,6 +204,62 @@
     });
   }
 
+  function pushHistory() {
+    if (state.index < 0) return;
+    state.history.push({
+      chapterIndex: state.index,
+      progress: chapterProgress(),
+      element: visibleElementId(),
+      scrollTop: scroller().scrollTop,
+      scrollLeft: scroller().scrollLeft,
+    });
+    if (state.history.length > 50) state.history.shift();
+    post('history', { canGoBack: true });
+  }
+
+  function restoreHistoryEntry(entry) {
+    if (entry.chapterIndex !== state.index) {
+      // The target chapter must be loaded by Dart. Keep the rest of the stack
+      // so the reader can go back further afterwards.
+      post('restore', {
+        chapterIndex: entry.chapterIndex,
+        progress: entry.progress,
+        element: entry.element,
+      });
+      return;
+    }
+    if (entry.element) {
+      const section = sectionFor(entry.chapterIndex);
+      const target = section
+        ? Array.prototype.slice
+            .call(section.querySelectorAll('[id]'))
+            .find(function (el) {
+              return el.id === entry.element;
+            })
+        : null;
+      if (target) {
+        target.scrollIntoView({ block: 'start', behavior: 'auto' });
+        reportProgress(true);
+        return;
+      }
+    }
+    if (isBook()) {
+      scroller().scrollLeft = entry.scrollLeft;
+      computeLayout();
+      reportProgress(true);
+    } else {
+      scroller().scrollTop = entry.scrollTop;
+      reportProgress(true);
+    }
+  }
+
+  function goBack() {
+    const entry = state.history.pop();
+    if (!entry) return;
+    post('history', { canGoBack: state.history.length > 0 });
+    restoreHistoryEntry(entry);
+  }
+
   function trimSections() {
     if (isBook()) return;
     const list = sections();
@@ -326,9 +383,11 @@
       // from the section that is on screen and only if it really is there.
       const scope = currentSection() || content();
       const target = scope
-        ? scope.querySelectorAll('[id]').find(function (el) {
-            return el.id === element;
-          })
+        ? Array.prototype.slice
+            .call(scope.querySelectorAll('[id]'))
+            .find(function (el) {
+              return el.id === element;
+            })
         : null;
       if (target && content().contains(target)) {
         target.scrollIntoView({ block: 'start', behavior: 'auto' });
@@ -534,7 +593,10 @@
       y: event.clientY,
       time: Date.now(),
       moved: false,
-      onLink: !!event.target.closest('a'),
+      // Only an anchor that actually points somewhere is a link. `<a id="x">`
+      // is frequently used as a chapter marker and must keep page turns and
+      // the menu working.
+      onLink: !!event.target.closest('a[href]'),
     };
   }
 
@@ -572,7 +634,7 @@
       return;
     }
 
-    if (touch.onLink || event.target.closest('a')) return;
+    if (touch.onLink || event.target.closest('a[href]')) return;
     if (elapsed > 700) {
       post('toggleChrome');
       return;
@@ -648,8 +710,26 @@
     reportProgress(false);
   }
 
+  // Finds the element an in-chapter fragment points at.
+  //
+  // Ids are only unique inside one chapter, and scroll mode can keep several
+  // chapters in the document at once. Looking up `document` directly made
+  // `#note1` jump to a footnote in a different chapter.
+  function findFragmentTarget(anchor, id) {
+    const scope = anchor.closest('.folio-chapter') || currentSection();
+    if (!scope) return null;
+    if (scope.id === id) return scope;
+    return (
+      Array.prototype.slice
+        .call(scope.querySelectorAll('[id]'))
+        .find(function (el) {
+          return el.id === id;
+        }) || null
+    );
+  }
+
   function onLinkClick(event) {
-    const anchor = event.target.closest('a');
+    const anchor = event.target.closest('a[href]');
     if (!anchor) return;
     const href = anchor.getAttribute('href');
     if (!href) return;
@@ -660,15 +740,19 @@
       } catch (e) {
         /* Keep the raw id for malformed escapes. */
       }
-      const target = document.getElementById(id);
-      if (target) {
-        event.preventDefault();
-        target.scrollIntoView({ block: 'start', behavior: 'auto' });
-      }
+      const target = findFragmentTarget(anchor, id);
+      event.preventDefault();
+      if (!target) return;
+      // Remember where the reader was before following the footnote link, so
+      // the link does not strand them at the end of the chapter.
+      pushHistory();
+      target.scrollIntoView({ block: 'start', behavior: 'auto' });
+      reportProgress(true);
       return;
     }
     if (href.indexOf('file:') === 0 || href.indexOf('http') === 0) {
       event.preventDefault();
+      if (href.indexOf('file:') === 0) pushHistory();
       post('link', { href: href });
       return;
     }
@@ -725,6 +809,7 @@
     prependChapter: prependChapter,
     nextPage: nextPage,
     prevPage: prevPage,
+    goBack: goBack,
     goToProgress: goToProgress,
     startAutoScroll: startAutoScroll,
     pauseAutoScroll: pauseAutoScroll,

@@ -67,6 +67,44 @@ body {
   color: inherit;
 }
 
+/* Publisher CSS often paints white boxes behind text, which becomes
+   unreadable in the dark and sepia themes. Background images are kept, but
+   solid fills are neutralised. */
+#folio-content .folio-chapter,
+#folio-content .folio-chapter * {
+  background-color: transparent !important;
+}
+
+/* User typography wins over the book's own rules. Headings are deliberately
+   left out of the font-size rule so their hierarchy still scales from the
+   chapter's base size. */
+#folio-content .folio-chapter {
+  font-family: var(--folio-font-family) !important;
+  font-size: var(--folio-font-size) !important;
+  line-height: var(--folio-line-height) !important;
+  text-align: var(--folio-align) !important;
+  color: var(--folio-fg) !important;
+  hyphens: var(--folio-hyphens) !important;
+  -webkit-hyphens: var(--folio-hyphens) !important;
+}
+
+#folio-content .folio-chapter p,
+#folio-content .folio-chapter li,
+#folio-content .folio-chapter dd,
+#folio-content .folio-chapter dt,
+#folio-content .folio-chapter blockquote,
+#folio-content .folio-chapter figcaption,
+#folio-content .folio-chapter td,
+#folio-content .folio-chapter th {
+  font-family: var(--folio-font-family) !important;
+  font-size: var(--folio-font-size) !important;
+  line-height: var(--folio-line-height) !important;
+  text-align: var(--folio-align) !important;
+  color: var(--folio-fg) !important;
+  hyphens: var(--folio-hyphens) !important;
+  -webkit-hyphens: var(--folio-hyphens) !important;
+}
+
 #folio-content a {
   color: inherit;
   text-decoration: underline;
@@ -193,40 +231,9 @@ body {
   -webkit-hyphens: none;
 }
 
-#folio-content p {
-  margin: 0 0 0.65em;
-}
-
-/* Running text: indent each paragraph and drop the blank line between
-   paragraphs, as in a printed book. */
-#folio-content .main > p,
-#folio-content .folio-chapter > p,
-#folio-content section > p {
-  margin: 0;
-  text-indent: 1.5em;
-}
-
-/* Structural paragraphs keep their own alignment instead of being indented. */
-#folio-content
-  :is(.main, .folio-chapter, section)
-  > p:is(.center, .right, .left, .noindent, .divider, .divider-2, .signature) {
-  text-indent: 0;
-}
-
-#folio-content :is(.main, .folio-chapter, section) > p.new-part {
-  margin-top: 1.2em;
-}
-
-#folio-content :is(.main, .folio-chapter, section) > p.new-part-2 {
-  margin-top: 2.4em;
-}
-
-#folio-content
-  :is(.main, .folio-chapter, section)
-  > p:is(.divider, .divider-2) {
-  margin: 1.2em 0;
-  text-align: center;
-}
+/* Paragraph spacing and indentation belong to the book. The reader used to
+   impose one publisher's style on every book, which broke poetry, centred
+   text and paragraph styles that use blank lines instead of indents. */
 
 /* The publisher's index page is a <nav> of nested lists; render it as a
    clean contents list rather than a bulleted outline. */

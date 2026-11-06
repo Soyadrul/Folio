@@ -81,6 +81,7 @@ class EpubDocument {
     required this.coverImagePath,
     required this.resolver,
     required this.totalChapterBytes,
+    this.auxiliaryDocuments = const [],
   });
 
   final String filePath;
@@ -93,7 +94,15 @@ class EpubDocument {
 
   final String title;
   final String author;
+
+  /// Documents in the spine's reading order (next/previous flow).
   final List<EpubChapter> chapters;
+
+  /// Documents that are not part of the reading flow but can be opened by a
+  /// link or a table-of-contents entry: `linear="no"` spine items, footnote
+  /// pages and other manifest documents outside the spine.
+  final List<EpubChapter> auxiliaryDocuments;
+
   final List<EpubTocEntry> toc;
   final String? coverImagePath;
   final HrefResolver resolver;
@@ -101,18 +110,53 @@ class EpubDocument {
 
   String get rootDir => cacheDir;
 
+  /// Every openable document, in index order.
+  ///
+  /// Spine indexes come first and auxiliary indexes follow, so an
+  /// [EpubChapter.index] is always the position in this list.
+  List<EpubChapter> get allDocuments => [...chapters, ...auxiliaryDocuments];
+
+  int get documentCount => chapters.length + auxiliaryDocuments.length;
+
+  /// Returns the document with the global [index].
+  EpubChapter? documentAt(int index) {
+    if (index < 0) return null;
+    if (index < chapters.length) return chapters[index];
+    final auxiliary = index - chapters.length;
+    if (auxiliary < auxiliaryDocuments.length) {
+      return auxiliaryDocuments[auxiliary];
+    }
+    return null;
+  }
+
   EpubChapter? chapterByRelPath(String relPath) {
-    for (final chapter in chapters) {
+    for (final chapter in allDocuments) {
       if (chapter.relPath == relPath) return chapter;
     }
     return null;
   }
 
-  /// Index of the chapter containing [relPath], or the closest earlier one.
-  int? chapterIndexForPath(String relPath) {
-    final exact = chapterByRelPath(relPath);
-    if (exact != null) return exact.index;
-    return null;
+  /// Index of the document containing [relPath], if it is openable.
+  int? chapterIndexForPath(String relPath) => chapterByRelPath(relPath)?.index;
+
+  /// Index of the next document in the reading flow, or null at the end.
+  int? nextReadingIndex(int index) {
+    final position = chapters.indexWhere((chapter) => chapter.index == index);
+    if (position < 0 || position + 1 >= chapters.length) return null;
+    return chapters[position + 1].index;
+  }
+
+  /// Index of the previous document in the reading flow, or null at the start.
+  int? previousReadingIndex(int index) {
+    final position = chapters.indexWhere((chapter) => chapter.index == index);
+    if (position <= 0) return null;
+    return chapters[position - 1].index;
+  }
+
+  /// One-based position in the reading flow, or null for an auxiliary page.
+  int? readingOrderPosition(int index) {
+    final position = chapters.indexWhere((chapter) => chapter.index == index);
+    return position < 0 ? null : position + 1;
   }
 
   /// Reads and rewrites [chapter] for the WebView.
@@ -121,8 +165,15 @@ class EpubDocument {
     // Some older books are not valid UTF-8; replacement characters are much
     // better than refusing to open the chapter.
     final raw = utf8.decode(bytes, allowMalformed: true);
-    return rewriteChapterHtml(
+    final content = rewriteChapterHtml(
       raw,
+      chapterPath: chapter.relPath,
+      bookRoot: rootDir,
+      resolver: resolver,
+    );
+    return prepareChapterStyles(
+      content,
+      chapterIndex: chapter.index,
       chapterPath: chapter.relPath,
       bookRoot: rootDir,
       resolver: resolver,
@@ -195,7 +246,7 @@ class EpubLoader {
     var reusable = false;
     if (await dir.exists() && await marker.exists()) {
       try {
-        final data = jsonDecode(await marker.readAsString());
+        final data = jsonDecode(await _readText(marker));
         reusable =
             data is Map &&
             data['size'] == stat.size &&
@@ -343,7 +394,7 @@ class EpubLoader {
     );
     final XmlDocument container;
     try {
-      container = XmlDocument.parse(await containerFile.readAsString());
+      container = XmlDocument.parse(await _readText(containerFile));
     } catch (e) {
       throw EpubException('META-INF/container.xml is not valid XML: $e');
     }
@@ -378,7 +429,7 @@ class EpubLoader {
 
     final XmlDocument opf;
     try {
-      opf = XmlDocument.parse(await File(opfPath).readAsString());
+      opf = XmlDocument.parse(await _readText(File(opfPath)));
     } catch (e) {
       throw EpubException('The EPUB package document is not valid XML: $e');
     }
@@ -414,38 +465,103 @@ class EpubLoader {
       );
     }
 
-    final chapters = <EpubChapter>[];
-    final spineHrefs = <String>{};
+    // Every spine entry is kept: `linear="no"` items and documents outside the
+    // spine are still reachable through links and the table of contents.
+    final spineDocuments =
+        <
+          ({
+            _ManifestItem item,
+            String relPath,
+            String absolute,
+            String href,
+            bool linear,
+          })
+        >[];
+    final seenSpinePaths = <String>{};
     for (final itemref in _allElements(spine, 'itemref')) {
       final idref = _attribute(itemref, 'idref');
       if (idref == null) continue;
       final item = manifestItems[idref];
       if (item == null) continue;
-      // Auxiliary pages stay out of the reading flow, except the EPUB 3
-      // navigation document: it is the book's index page and readers expect
-      // to find it where the publisher placed it in the spine.
-      final isNavigation = item.properties.split(' ').contains('nav');
-      if (!isNavigation &&
-          (_attribute(itemref, 'linear') ?? '').toLowerCase() == 'no') {
-        continue;
-      }
       final resolved = resolver.resolve(item.href, basePath: opfRel);
       if (resolved.path == null) continue;
+      if (!seenSpinePaths.add(resolved.path!)) continue;
       final absolute = p.joinAll([cacheDir, ...resolved.path!.split('/')]);
       if (!await File(absolute).exists()) continue;
-      if (!spineHrefs.add(resolved.path!)) continue;
-      final stat = await File(absolute).stat();
-      chapters.add(
-        EpubChapter(
-          index: chapters.length,
-          href: item.href,
+      // The EPUB 3 navigation document stays in the reading flow even when
+      // the publisher marks it non-linear: readers expect to find the book's
+      // index page where the publisher placed it.
+      final isNavigation = item.properties.split(' ').contains('nav');
+      final linear =
+          isNavigation ||
+          (_attribute(itemref, 'linear') ?? '').toLowerCase() != 'no';
+      spineDocuments.add((
+        item: item,
+        relPath: resolved.path!,
+        absolute: absolute,
+        href: item.href,
+        linear: linear,
+      ));
+    }
+
+    final orderedDocuments =
+        <
+          ({
+            ({
+              _ManifestItem item,
+              String relPath,
+              String absolute,
+              String href,
+              bool linear,
+            })
+            document,
+            bool auxiliary,
+          })
+        >[
+          for (final document in spineDocuments)
+            if (document.linear) (document: document, auxiliary: false),
+          for (final document in spineDocuments)
+            if (!document.linear) (document: document, auxiliary: true),
+        ];
+    final knownPaths = spineDocuments.map((d) => d.relPath).toSet();
+    for (final item in manifestItems.values) {
+      if (!_isHtmlDocument(item.mediaType, item.href)) continue;
+      final resolved = resolver.resolve(item.href, basePath: opfRel);
+      if (resolved.path == null || !knownPaths.add(resolved.path!)) continue;
+      final absolute = p.joinAll([cacheDir, ...resolved.path!.split('/')]);
+      if (!await File(absolute).exists()) continue;
+      orderedDocuments.add((
+        document: (
+          item: item,
           relPath: resolved.path!,
-          path: absolute,
-          title: '',
-          byteSize: stat.size,
-          mediaType: item.mediaType,
+          absolute: absolute,
+          href: item.href,
+          linear: false,
         ),
+        auxiliary: true,
+      ));
+    }
+
+    final chapters = <EpubChapter>[];
+    final auxiliaryDocuments = <EpubChapter>[];
+    var nextIndex = 0;
+    for (final entry in orderedDocuments) {
+      final document = entry.document;
+      final stat = await File(document.absolute).stat();
+      final chapter = EpubChapter(
+        index: nextIndex++,
+        href: document.href,
+        relPath: document.relPath,
+        path: document.absolute,
+        title: '',
+        byteSize: stat.size,
+        mediaType: document.item.mediaType,
       );
+      if (entry.auxiliary) {
+        auxiliaryDocuments.add(chapter);
+      } else {
+        chapters.add(chapter);
+      }
     }
 
     if (chapters.isEmpty) {
@@ -454,17 +570,17 @@ class EpubLoader {
       );
     }
 
+    final openableDocuments = [...chapters, ...auxiliaryDocuments];
     final toc = await _parseToc(
       metadata: metadata,
       manifestItems: manifestItems,
-      chapters: chapters,
+      chapters: openableDocuments,
       cacheDir: cacheDir,
       opfRel: opfRel,
       resolver: resolver,
     );
 
-    final titledChapters = <EpubChapter>[];
-    for (final chapter in chapters) {
+    Future<EpubChapter> withTitle(EpubChapter chapter) async {
       final tocTitle = toc
           .where((t) => t.chapterIndex == chapter.index)
           .map((t) => t.title)
@@ -472,19 +588,28 @@ class EpubLoader {
       final titleFromChapter = tocTitle.isEmpty
           ? await _chapterTitle(chapter.path)
           : tocTitle;
-      titledChapters.add(
-        EpubChapter(
-          index: chapter.index,
-          href: chapter.href,
-          relPath: chapter.relPath,
-          path: chapter.path,
-          title: titleFromChapter.isEmpty
-              ? 'Chapter ${chapter.index + 1}'
-              : titleFromChapter,
-          byteSize: chapter.byteSize,
-          mediaType: chapter.mediaType,
-        ),
+      final inReadingFlow = chapters.any((c) => c.index == chapter.index);
+      final fallback = inReadingFlow
+          ? 'Chapter ${chapter.index + 1}'
+          : p.basenameWithoutExtension(chapter.relPath);
+      return EpubChapter(
+        index: chapter.index,
+        href: chapter.href,
+        relPath: chapter.relPath,
+        path: chapter.path,
+        title: titleFromChapter.isEmpty ? fallback : titleFromChapter,
+        byteSize: chapter.byteSize,
+        mediaType: chapter.mediaType,
       );
+    }
+
+    final titledChapters = <EpubChapter>[];
+    for (final chapter in chapters) {
+      titledChapters.add(await withTitle(chapter));
+    }
+    final titledAuxiliary = <EpubChapter>[];
+    for (final chapter in auxiliaryDocuments) {
+      titledAuxiliary.add(await withTitle(chapter));
     }
 
     final cover = await _resolveCover(
@@ -505,6 +630,7 @@ class EpubLoader {
       title: title.isEmpty ? p.basenameWithoutExtension(filePath) : title,
       author: author,
       chapters: titledChapters,
+      auxiliaryDocuments: titledAuxiliary,
       toc: toc,
       coverImagePath: cover,
       resolver: resolver,
@@ -553,24 +679,36 @@ class EpubLoader {
         final file = File(p.joinAll([cacheDir, ...resolved.path!.split('/')]));
         if (await file.exists()) {
           final navBase = resolved.path!;
-          final document = html_parser.parse(await file.readAsString());
-          final nav = document
-              .querySelectorAll('nav')
-              .where((n) => _hasTocType(n))
-              .firstOrNull;
-          final scope = nav ?? document.body;
-          if (scope != null) {
-            for (final anchor in scope.querySelectorAll('a')) {
-              final href = anchor.attributes['href'];
-              if (href == null) continue;
-              var level = 0;
-              var parent = anchor.parent;
-              while (parent != null && parent != scope) {
-                if (parent.localName?.toLowerCase() == 'ol') level++;
-                parent = parent.parent;
+          final before = entries.length;
+          try {
+            final document = html_parser.parse(await _readText(file));
+            final nav = document
+                .querySelectorAll('nav')
+                .where((n) => _hasTocType(n))
+                .firstOrNull;
+            final scope = nav ?? document.body;
+            if (scope != null) {
+              for (final anchor in scope.querySelectorAll('a')) {
+                final href = anchor.attributes['href'];
+                if (href == null) continue;
+                var level = 0;
+                var parent = anchor.parent;
+                while (parent != null && parent != scope) {
+                  if (parent.localName?.toLowerCase() == 'ol') level++;
+                  parent = parent.parent;
+                }
+                add(
+                  anchor.text,
+                  href,
+                  navBase,
+                  level: level > 0 ? level - 1 : 0,
+                );
               }
-              add(anchor.text, href, navBase, level: level > 0 ? level - 1 : 0);
             }
+          } catch (_) {
+            // A damaged or badly encoded navigation document must not make the
+            // book unreadable. Discard a partial result and use the NCX.
+            entries.removeRange(before, entries.length);
           }
         }
       }
@@ -593,7 +731,7 @@ class EpubLoader {
           );
           if (await file.exists()) {
             try {
-              final document = XmlDocument.parse(await file.readAsString());
+              final document = XmlDocument.parse(await _readText(file));
               for (final point
                   in document.descendants.whereType<XmlElement>().where(
                     (e) => e.name.local == 'navPoint',
@@ -606,12 +744,15 @@ class EpubLoader {
                 final before = entries.length;
                 add(text, src, resolved.path!);
                 if (entries.length > before) {
-                  final level = _ancestorNames(point, 'navPoint').length - 1;
+                  // `_ancestorNames` already excludes the point itself, so a
+                  // top-level navPoint has no ancestors (level 0) and its
+                  // children have one (level 1).
+                  final level = _ancestorNames(point, 'navPoint').length;
                   entries[entries.length - 1] = EpubTocEntry(
                     title: entries.last.title,
                     chapterIndex: entries.last.chapterIndex,
                     fragment: entries.last.fragment,
-                    level: level < 0 ? 0 : level,
+                    level: level,
                   );
                 }
               }
@@ -624,6 +765,15 @@ class EpubLoader {
     }
 
     return entries;
+  }
+
+  /// Reads an EPUB text file as UTF-8 even when a few bytes are invalid.
+  ///
+  /// Old books regularly contain a stray Windows-1252 byte in the OPF, nav or
+  /// NCX. Replacement characters are always better than failing to open the
+  /// whole book.
+  static Future<String> _readText(File file) async {
+    return utf8.decode(await file.readAsBytes(), allowMalformed: true);
   }
 
   Future<String> _chapterTitle(String path) async {
@@ -764,6 +914,15 @@ class EpubLoader {
       // A broken cover chapter is not fatal.
     }
     return null;
+  }
+
+  static bool _isHtmlDocument(String mediaType, String href) {
+    final type = mediaType.toLowerCase();
+    if (type.contains('xhtml') || type == 'text/html') return true;
+    final lower = href.toLowerCase();
+    return lower.endsWith('.xhtml') ||
+        lower.endsWith('.html') ||
+        lower.endsWith('.htm');
   }
 
   static bool _isImagePath(String path) {

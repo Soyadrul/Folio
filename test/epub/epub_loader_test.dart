@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -41,19 +42,117 @@ void main() {
       expect(book.totalChapterBytes, greaterThan(0));
     });
 
-    test('excludes spine items marked linear="no"', () async {
-      final opf = epub2Opf.replaceFirst(
-        '<itemref idref="skipped" linear="no"/>',
-        '<item idref="skipped" href="text/ch2.xhtml" '
-            'media-type="application/xhtml+xml"/>'
-            '<itemref idref="skipped" linear="no"/>',
-      );
-      final file = await EpubFixture.write(tmp, epub2Entries(opf: opf));
+    test('excludes non-linear pages from the reading flow', () async {
+      final file = await EpubFixture.write(tmp, epub2Entries());
       final book = await loader().load(file.path);
       expect(book.chapters.map((c) => c.href), [
         'text/ch1.xhtml',
         'text/ch2.xhtml',
       ]);
+      expect(book.auxiliaryDocuments.map((c) => c.href), [
+        'text/notes.xhtml',
+        'text/endnotes.xhtml',
+      ]);
+    });
+
+    test(
+      'keeps auxiliary documents openable and out of next/previous',
+      () async {
+        const ncx = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+  <navMap>
+    <navPoint id="n1"><navLabel><text>One</text></navLabel>
+      <content src="text/ch1.xhtml"/></navPoint>
+    <navPoint id="n2"><navLabel><text>Notes</text></navLabel>
+      <content src="text/notes.xhtml#n1"/></navPoint>
+    <navPoint id="n3"><navLabel><text>Endnotes</text></navLabel>
+      <content src="text/endnotes.xhtml"/></navPoint>
+  </navMap>
+</ncx>
+''';
+        final file = await EpubFixture.write(tmp, epub2Entries(ncx: ncx));
+        final book = await loader().load(file.path);
+
+        expect(book.chapters, hasLength(2));
+        expect(book.auxiliaryDocuments, hasLength(2));
+        expect(book.documentCount, 4);
+        expect(book.allDocuments, hasLength(4));
+        expect(book.documentAt(2)?.relPath, 'OEBPS/text/notes.xhtml');
+        expect(book.documentAt(3)?.relPath, 'OEBPS/text/endnotes.xhtml');
+        expect(book.documentAt(4), isNull);
+        expect(book.chapterIndexForPath('OEBPS/text/notes.xhtml'), 2);
+
+        expect(book.nextReadingIndex(0), 1);
+        expect(book.nextReadingIndex(1), isNull);
+        expect(book.nextReadingIndex(2), isNull);
+        expect(book.previousReadingIndex(1), 0);
+        expect(book.previousReadingIndex(2), isNull);
+        expect(book.readingOrderPosition(1), 2);
+        expect(book.readingOrderPosition(2), isNull);
+
+        expect(
+          book.toc
+              .where((entry) => entry.chapterIndex == 2)
+              .map((e) => e.title),
+          contains('Notes'),
+        );
+      },
+    );
+
+    test('reads NCX nesting levels', () async {
+      const ncx = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+  <navMap>
+    <navPoint id="p1"><navLabel><text>Part</text></navLabel>
+      <content src="text/ch1.xhtml"/>
+      <navPoint id="p2"><navLabel><text>Chapter</text></navLabel>
+        <content src="text/ch1.xhtml#start"/>
+        <navPoint id="p3"><navLabel><text>Section</text></navLabel>
+          <content src="text/ch2.xhtml"/></navPoint>
+      </navPoint>
+    </navPoint>
+  </navMap>
+</ncx>
+''';
+      final file = await EpubFixture.write(tmp, epub2Entries(ncx: ncx));
+      final book = await loader().load(file.path);
+
+      expect(book.toc.map((entry) => entry.title), [
+        'Part',
+        'Chapter',
+        'Section',
+      ]);
+      expect(book.toc.map((entry) => entry.level), [0, 1, 2]);
+    });
+
+    test('opens a book whose package and nav have invalid UTF-8', () async {
+      final marked = epub3Opf.replaceFirst('New Book', 'New@@BYTE@@Book');
+      final parts = marked.split('@@BYTE@@');
+      final opfBytes = <int>[
+        ...utf8.encode(parts[0]),
+        0xff,
+        ...utf8.encode(parts[1]),
+      ];
+      final navMarked = epub3Nav.replaceFirst('First', 'Fir@@BYTE@@st');
+      final navParts = navMarked.split('@@BYTE@@');
+      final navBytes = <int>[
+        ...utf8.encode(navParts[0]),
+        0xff,
+        ...utf8.encode(navParts[1]),
+      ];
+      final entries = <String, Object>{...epub3Entries()};
+      entries.remove('OEBPS/nav.xhtml');
+      entries['OEBPS/content.opf'] = opfBytes;
+      entries['OEBPS/nav.xhtml'] = navBytes;
+
+      final file = await EpubFixture.write(tmp, entries);
+      final book = await loader().load(file.path);
+
+      expect(book.chapters, hasLength(2));
+      expect(book.title, contains('New'));
+      expect(book.toc, isNotEmpty);
     });
 
     test('falls back to the guide cover chapter image', () async {

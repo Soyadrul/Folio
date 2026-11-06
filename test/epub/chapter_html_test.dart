@@ -1,6 +1,9 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:folio/epub/href_resolver.dart';
 import 'package:folio/epub/chapter_html.dart';
+import 'package:path/path.dart' as p;
 
 void main() {
   final resolver = HrefResolver([
@@ -213,6 +216,212 @@ void main() {
       final c = rewrite('<img src="../images/gone.png"/>');
       expect(c.bodyHtml, contains('data-folio-missing-image'));
       expect(c.bodyHtml, isNot(contains('gone.png')));
+    });
+  });
+
+  group('XHTML self-closing tags', () {
+    test('expands an empty anchor instead of swallowing the chapter', () {
+      final c = rewrite('<p>before</p><a id="marker"/><p>after</p>');
+      expect(c.bodyHtml, contains('before'));
+      expect(c.bodyHtml, contains('after'));
+      final anchor = RegExp(
+        r'<a[^>]*id="marker"[^>]*>(.*?)</a>',
+        dotAll: true,
+      ).firstMatch(c.bodyHtml);
+      expect(anchor, isNotNull);
+      expect(anchor!.group(1), isEmpty);
+    });
+
+    test('does not let a self-closing title eat the body', () {
+      final c = rewrite(
+        '<html><head><title/></head><body><p>visible</p></body></html>',
+      );
+      expect(c.bodyHtml, contains('visible'));
+    });
+
+    test('leaves void tags self-closing', () {
+      final c = rewrite('<p>a<br/>b</p><img src="../images/pic.jpg"/>');
+      expect(c.bodyHtml, contains('<br>'));
+      expect(c.bodyHtml, contains('file:///cache/book/OEBPS/images/pic.jpg'));
+    });
+  });
+
+  group('fragment links', () {
+    test('keeps a same-chapter fragment on the page', () {
+      final c = rewrite('<a href="ch1.xhtml#note1">note</a>');
+      expect(c.bodyHtml, contains('href="#note1"'));
+      expect(
+        c.bodyHtml,
+        isNot(contains('file:///cache/book/OEBPS/text/ch1.xhtml')),
+      );
+    });
+
+    test('keeps a bare #fragment unchanged', () {
+      final c = rewrite('<a href="#note2">note</a>');
+      expect(c.bodyHtml, contains('href="#note2"'));
+    });
+
+    test('rewrites a cross-chapter link with its fragment', () {
+      final c = rewrite('<a href="ch2.xhtml#sec">next</a>');
+      expect(
+        c.bodyHtml,
+        contains('href="file:///cache/book/OEBPS/text/ch2.xhtml#sec"'),
+      );
+    });
+  });
+
+  group('scopeBookCss', () {
+    const scope = '.folio-chapter[data-folio-index="2"]';
+
+    test('prefixes an element selector with the chapter scope', () {
+      expect(
+        scopeBookCss('p { color: red; }', scope),
+        '$scope p{ color: red; }',
+      );
+    });
+
+    test('turns body and html selectors into the chapter scope', () {
+      expect(
+        scopeBookCss('body { color: red }', scope),
+        '$scope{ color: red }',
+      );
+      expect(
+        scopeBookCss('html body p { margin: 0 }', scope),
+        '$scope p{ margin: 0 }',
+      );
+      expect(
+        scopeBookCss('body > .x { color: red }', scope),
+        '$scope.x{ color: red }',
+      );
+    });
+
+    test('scopes every rule in a selector list', () {
+      final scoped = scopeBookCss('p, .note { color: red }', scope);
+      expect(scoped, contains('$scope p'));
+      expect(scoped, contains('$scope .note'));
+    });
+
+    test('scopes rules inside @media but leaves @font-face alone', () {
+      final scoped = scopeBookCss(
+        '@media (min-width: 1px) { p { color: red } }'
+        '@font-face { font-family: X; src: url(font.woff); }',
+        scope,
+      );
+      expect(scoped, contains('@media (min-width: 1px){'));
+      expect(scoped, contains('$scope p{ color: red }'));
+      expect(scoped, contains('@font-face{ font-family: X;'));
+    });
+
+    test('keeps comments and does not touch strings containing braces', () {
+      final scoped = scopeBookCss(
+        '/* a } comment */ p::before { content: "}" }',
+        scope,
+      );
+      expect(scoped, contains('/* a } comment */'));
+      expect(scoped, contains('$scope p::before{ content: "}" }'));
+    });
+  });
+
+  group('prepareChapterStyles', () {
+    late Directory tmp;
+
+    setUp(() async {
+      tmp = await Directory.systemTemp.createTemp('folio-styles-');
+    });
+
+    tearDown(() async {
+      await tmp.delete(recursive: true);
+    });
+
+    test('inlines a linked stylesheet and scopes it to the chapter', () async {
+      final styleDir = Directory(p.join(tmp.path, 'OEBPS', 'style'))
+        ..createSync(recursive: true);
+      final cssFile = File(p.join(styleDir.path, 'book.css'))
+        ..writeAsStringSync(
+          '@import url("other.css");'
+          'body { font-family: serif; }'
+          'p.note { color: red; }',
+        );
+      final chapterFile = File(p.join(tmp.path, 'OEBPS', 'text', 'ch1.xhtml'))
+        ..createSync(recursive: true);
+
+      final content = ChapterContent(
+        bodyHtml: '<p class="note">x</p>',
+        headHtml:
+            '<link rel="stylesheet" href="${Uri.file(cssFile.path)}"/>'
+            '<style>.local { color: blue }</style>',
+        missingResources: [],
+      );
+
+      final prepared = await prepareChapterStyles(
+        content,
+        chapterIndex: 2,
+        chapterPath: 'OEBPS/text/ch1.xhtml',
+        bookRoot: tmp.path,
+        resolver: HrefResolver([
+          'OEBPS/text/ch1.xhtml',
+          'OEBPS/style/book.css',
+          'OEBPS/style/other.css',
+        ]),
+      );
+
+      expect(chapterFile.existsSync(), isTrue);
+      expect(
+        prepared.webStyleHtml,
+        contains('.folio-chapter[data-folio-index="2"]'),
+      );
+      expect(
+        prepared.webStyleHtml,
+        contains('.folio-chapter[data-folio-index="2"] p.note'),
+      );
+      expect(prepared.webStyleHtml, isNot(contains('@import')));
+      expect(prepared.webStyleHtml, contains('font-family: serif'));
+      expect(
+        prepared.webStyleHtml,
+        contains('.folio-chapter[data-folio-index="2"] .local'),
+      );
+    });
+
+    test('keeps book CSS for the fallback without scope prefixes', () async {
+      const content = ChapterContent(
+        bodyHtml: '<p>x</p>',
+        headHtml: '<style>p { color: red }</style>',
+        missingResources: [],
+      );
+
+      final prepared = await prepareChapterStyles(
+        content,
+        chapterIndex: 0,
+        chapterPath: 'OEBPS/text/ch1.xhtml',
+        bookRoot: tmp.path,
+        resolver: resolver,
+      );
+
+      expect(prepared.bookStyleHtml, contains('p { color: red }'));
+      expect(
+        prepared.bookStyleHtml,
+        isNot(contains('.folio-chapter[data-folio-index="0"]')),
+      );
+    });
+
+    test('survives a missing linked stylesheet', () async {
+      final content = ChapterContent(
+        bodyHtml: '<p>x</p>',
+        headHtml:
+            '<link rel="stylesheet" href="file://${tmp.path}/OEBPS/style/gone.css"/>',
+        missingResources: [],
+      );
+
+      final prepared = await prepareChapterStyles(
+        content,
+        chapterIndex: 0,
+        chapterPath: 'OEBPS/text/ch1.xhtml',
+        bookRoot: tmp.path,
+        resolver: resolver,
+      );
+
+      expect(prepared.bodyHtml, contains('<p>x</p>'));
+      expect(prepared.webStyleHtml, isEmpty);
     });
   });
 }

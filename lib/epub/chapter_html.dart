@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:html/dom.dart';
 import 'package:html/parser.dart' as html_parser;
 import 'package:path/path.dart' as p;
@@ -10,6 +13,8 @@ class ChapterContent {
     required this.bodyHtml,
     required this.headHtml,
     required this.missingResources,
+    this.webStyleHtml = '',
+    this.bookStyleHtml = '',
     this.bodyClass,
     this.bodyStyle,
     this.language,
@@ -20,6 +25,20 @@ class ChapterContent {
 
   /// Stylesheet links and `<style>` blocks found in the chapter `<head>`.
   final String headHtml;
+
+  /// Book CSS prepared for the WebView shell.
+  ///
+  /// Linked stylesheets are inlined and every selector is scoped to this
+  /// chapter's `<section>`, so a rule from one chapter cannot restyle another
+  /// chapter or the reader chrome.
+  final String webStyleHtml;
+
+  /// Only the `<style>` elements of the chapter head.
+  ///
+  /// The Flutter fallback cannot load linked stylesheets, but `flutter_html`
+  /// does apply inline `<style>` blocks when they are part of the rendered
+  /// HTML.
+  final String bookStyleHtml;
 
   /// Local resources that could not be found (for diagnostics/logging).
   final List<String> missingResources;
@@ -44,7 +63,7 @@ ChapterContent rewriteChapterHtml(
   required String bookRoot,
   required HrefResolver resolver,
 }) {
-  final document = html_parser.parse(rawHtml);
+  final document = html_parser.parse(_expandSelfClosingTags(rawHtml));
   final body = document.body ?? document.createElement('body');
   final head = document.head;
 
@@ -64,6 +83,11 @@ ChapterContent rewriteChapterHtml(
       // Data images are safe and used by many books; data links are not.
       return allowData ? value : null;
     }
+    if (isLink && value.startsWith('#')) {
+      // A same-document footnote link must stay a fragment. Sending it to Dart
+      // reloaded and re-paginated the whole chapter for every footnote.
+      return value;
+    }
 
     final resolved = resolver.resolve(value, basePath: chapterPath);
     if (resolved.isExternal) {
@@ -74,6 +98,15 @@ ChapterContent rewriteChapterHtml(
     if (resolved.path == null) {
       if (!isLink) missing.add(resolved.normalizedPath ?? value);
       return null;
+    }
+    if (isLink &&
+        !isStylesheet &&
+        resolved.path == chapterPath &&
+        resolved.fragment != null &&
+        resolved.fragment!.isNotEmpty) {
+      // The target is in this chapter; keep it as an in-page fragment so the
+      // browser can scroll without loading the chapter again.
+      return '#${Uri.encodeComponent(resolved.fragment!)}';
     }
     final absolute = p.join(bookRoot, resolved.path!);
     var uri = resolver.fileUri(absolute);
@@ -154,17 +187,14 @@ ChapterContent rewriteChapterHtml(
     if (tag == 'link') {
       // A chapter may only bring in local stylesheets; preloads, icons and
       // remote styles are dropped.
-      final rel = (element.attributes['rel'] ?? '')
-          .toLowerCase()
-          .split(RegExp(r'\s+'));
+      final rel = (element.attributes['rel'] ?? '').toLowerCase().split(
+        RegExp(r'\s+'),
+      );
       if (!rel.contains('stylesheet')) {
         element.remove();
         continue;
       }
-      final rewritten = rewrite(
-        element.attributes['href'],
-        isStylesheet: true,
-      );
+      final rewritten = rewrite(element.attributes['href'], isStylesheet: true);
       if (rewritten == null) {
         element.remove();
       } else {
@@ -238,6 +268,7 @@ ChapterContent rewriteChapterHtml(
   }
 
   final headParts = <String>[];
+  final styleParts = <String>[];
   if (head != null) {
     for (final child in head.children.toList()) {
       final tag = child.localName?.toLowerCase() ?? '';
@@ -253,6 +284,7 @@ ChapterContent rewriteChapterHtml(
       if (tag == 'style' || tag == 'link' || tag == 'title') {
         headParts.add(child.outerHtml);
       }
+      if (tag == 'style') styleParts.add(child.outerHtml);
     }
   }
 
@@ -261,11 +293,127 @@ ChapterContent rewriteChapterHtml(
   return ChapterContent(
     bodyHtml: body.innerHtml,
     headHtml: headParts.join('\n'),
+    bookStyleHtml: styleParts.join('\n'),
     missingResources: missing,
     bodyClass: body.attributes['class'],
     bodyStyle: body.attributes['style'],
     language: language,
   );
+}
+
+/// XHTML allows `<a id="x"/>`, but the HTML5 parser used for chapters treats
+/// it as an opening tag and swallows the rest of the document. Rewriting
+/// self-closing non-void tags to an explicit pair keeps the chapter intact
+/// without switching the whole pipeline to an XML DOM.
+const _nonVoidHtmlTags = {
+  'a',
+  'abbr',
+  'address',
+  'article',
+  'aside',
+  'audio',
+  'b',
+  'bdi',
+  'bdo',
+  'blockquote',
+  'body',
+  'button',
+  'canvas',
+  'caption',
+  'cite',
+  'code',
+  'colgroup',
+  'data',
+  'datalist',
+  'dd',
+  'del',
+  'details',
+  'dfn',
+  'dialog',
+  'div',
+  'dl',
+  'dt',
+  'em',
+  'fieldset',
+  'figcaption',
+  'figure',
+  'footer',
+  'form',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'head',
+  'header',
+  'hgroup',
+  'html',
+  'i',
+  'ins',
+  'kbd',
+  'label',
+  'legend',
+  'li',
+  'main',
+  'map',
+  'mark',
+  'menu',
+  'meter',
+  'nav',
+  'noscript',
+  'ol',
+  'optgroup',
+  'option',
+  'output',
+  'p',
+  'picture',
+  'pre',
+  'progress',
+  'q',
+  'rp',
+  'rt',
+  'ruby',
+  's',
+  'samp',
+  'section',
+  'select',
+  'slot',
+  'small',
+  'span',
+  'strong',
+  'style',
+  'sub',
+  'summary',
+  'sup',
+  'table',
+  'tbody',
+  'td',
+  'template',
+  'textarea',
+  'tfoot',
+  'th',
+  'thead',
+  'time',
+  'title',
+  'tr',
+  'u',
+  'ul',
+  'var',
+  'video',
+};
+
+final _selfClosingTagPattern = RegExp(
+  r'''<([a-zA-Z][a-zA-Z0-9:.-]*)((?:[^>"']|"[^"]*"|'[^']*')*?)\s*/>''',
+);
+
+String _expandSelfClosingTags(String html) {
+  return html.replaceAllMapped(_selfClosingTagPattern, (match) {
+    final name = match.group(1)!;
+    final local = name.split(':').last.toLowerCase();
+    if (!_nonVoidHtmlTags.contains(local)) return match.group(0)!;
+    return '<$name${match.group(2)}></$name>';
+  });
 }
 
 String _attributeName(Object key) {
@@ -328,4 +476,290 @@ String _stripRemoteImports(String css) {
     caseSensitive: false,
   );
   return css.replaceAll(pattern, '');
+}
+
+/// Removes every `@import` rule.
+///
+/// Imported stylesheets cannot be scoped per chapter without inlining them, and
+/// an unscoped import would leak rules into the reader chrome and other
+/// chapters.
+String _stripAllImports(String css) {
+  final pattern = RegExp(
+    r'''@import\s+(?:url\(\s*)?(?:["'][^"']*["']|[^;]*)\s*;?''',
+    caseSensitive: false,
+  );
+  return css.replaceAll(pattern, '');
+}
+
+/// Inlines linked stylesheets and scopes the whole book CSS to one chapter.
+///
+/// EPUB stylesheets routinely style `body`/`html` and use generic selectors
+/// such as `p`. Inserted into the reader shell unchanged they would restyle the
+/// chrome and, in scroll mode, every other loaded chapter.
+Future<ChapterContent> prepareChapterStyles(
+  ChapterContent content, {
+  required int chapterIndex,
+  required String chapterPath,
+  required String bookRoot,
+  required HrefResolver resolver,
+}) async {
+  final scope = '.folio-chapter[data-folio-index="$chapterIndex"]';
+  final rawCss = <String>[];
+  final scopedCss = <String>[];
+  final head = html_parser.parseFragment(content.headHtml);
+
+  void addCss(String css) {
+    final cleaned = _stripAllImports(css.replaceFirst('\uFEFF', ''));
+    if (cleaned.trim().isEmpty) return;
+    rawCss.add(cleaned);
+    scopedCss.add(scopeBookCss(cleaned, scope));
+  }
+
+  for (final element in head.querySelectorAll('style')) {
+    addCss(element.text);
+  }
+
+  for (final link in head.querySelectorAll('link')) {
+    final rel = (link.attributes['rel'] ?? '').toLowerCase();
+    final href = link.attributes['href'];
+    if (!rel.contains('stylesheet') ||
+        href == null ||
+        !href.startsWith('file:')) {
+      continue;
+    }
+    final local = parseFileLink(href);
+    if (local == null) continue;
+    try {
+      final bytes = await File(local.path).readAsBytes();
+      final css = utf8.decode(bytes, allowMalformed: true);
+      final relPath = p
+          .relative(local.path, from: bookRoot)
+          .replaceAll('\\', '/');
+      final rewritten = _rewriteCssUrls(
+        css,
+        chapterPath: relPath,
+        bookRoot: bookRoot,
+        resolver: resolver,
+        missing: content.missingResources,
+      );
+      addCss(rewritten);
+    } catch (_) {
+      // A missing or unreadable stylesheet only costs that stylesheet.
+    }
+  }
+
+  return ChapterContent(
+    bodyHtml: content.bodyHtml,
+    headHtml: content.headHtml,
+    webStyleHtml: scopedCss.map((css) => '<style>$css</style>').join('\n'),
+    bookStyleHtml: rawCss.map((css) => '<style>$css</style>').join('\n'),
+    missingResources: content.missingResources,
+    bodyClass: content.bodyClass,
+    bodyStyle: content.bodyStyle,
+    language: content.language,
+  );
+}
+
+/// Rewrites every selector in [css] so it only matches inside [scope].
+String scopeBookCss(String css, String scope) {
+  final output = StringBuffer();
+  var index = 0;
+  while (index < css.length) {
+    if (css.startsWith('/*', index)) {
+      final end = css.indexOf('*/', index + 2);
+      final stop = end < 0 ? css.length : end + 2;
+      output.write(css.substring(index, stop));
+      index = stop;
+      continue;
+    }
+
+    final brace = _findTopLevelChar(css, index, '{');
+    final semicolon = _findTopLevelChar(css, index, ';');
+    if (semicolon >= 0 && (brace < 0 || semicolon < brace)) {
+      // Statements such as @charset or @namespace have no block.
+      output.write(css.substring(index, semicolon + 1));
+      index = semicolon + 1;
+      continue;
+    }
+    if (brace < 0) {
+      output.write(css.substring(index));
+      break;
+    }
+
+    final prelude = css.substring(index, brace).trim();
+    final close = _findMatchingBrace(css, brace);
+    if (close < 0) {
+      output.write(css.substring(index));
+      break;
+    }
+    final body = css.substring(brace + 1, close);
+    final lower = prelude.toLowerCase();
+    if (lower.startsWith('@')) {
+      final name = lower.split(RegExp(r'[\s({]')).first;
+      const nested = {
+        '@media',
+        '@supports',
+        '@document',
+        '@layer',
+        '@container',
+        '@starting-style',
+      };
+      if (nested.contains(name)) {
+        output.write('$prelude{${scopeBookCss(body, scope)}}');
+      } else {
+        // @font-face, @keyframes, @page, ... are not selectors.
+        output.write('$prelude{$body}');
+      }
+    } else {
+      output.write('${_scopeSelectorList(prelude, scope)}{$body}');
+    }
+    index = close + 1;
+  }
+  return output.toString();
+}
+
+String _scopeSelectorList(String selectors, String scope) {
+  return _splitTopLevel(selectors, ',')
+      .map((selector) => _scopeSelector(selector, scope))
+      .where((selector) => selector.isNotEmpty)
+      .join(', ');
+}
+
+String _scopeSelector(String raw, String scope) {
+  final selector = raw.trim();
+  if (selector.isEmpty) return '';
+  if (selector.contains('.folio-chapter')) return selector;
+  final replaced = _replaceRootSelector(selector, scope);
+  if (replaced.startsWith(scope)) return replaced;
+  if (replaced.startsWith('>') ||
+      replaced.startsWith('+') ||
+      replaced.startsWith('~')) {
+    return '$scope $replaced';
+  }
+  return '$scope $replaced';
+}
+
+/// Turns `body`, `html`, `:root`, `html body p`, ... into `scope ...`.
+String _replaceRootSelector(String selector, String scope) {
+  var rest = selector;
+  var matched = false;
+  while (true) {
+    final match = RegExp(
+      r'^(?:html|body|:root)(?=$|[\s>+~.#:\[])',
+      caseSensitive: false,
+    ).firstMatch(rest);
+    if (match == null) break;
+    matched = true;
+    rest = rest.substring(match.end).trimLeft();
+    if (rest.startsWith('>')) rest = rest.substring(1).trimLeft();
+  }
+  if (!matched) return selector;
+  if (rest.isEmpty) return scope;
+  if (rest.startsWith('.') ||
+      rest.startsWith('#') ||
+      rest.startsWith('[') ||
+      rest.startsWith(':')) {
+    return '$scope$rest';
+  }
+  return '$scope $rest';
+}
+
+int _findTopLevelChar(String css, int start, String wanted) {
+  var parens = 0;
+  var brackets = 0;
+  var index = start;
+  while (index < css.length) {
+    final char = css[index];
+    if (char == "'" || char == '"') {
+      index = _skipString(css, index);
+      continue;
+    }
+    if (css.startsWith('/*', index)) {
+      final end = css.indexOf('*/', index + 2);
+      index = end < 0 ? css.length : end + 2;
+      continue;
+    }
+    if (char == '(') {
+      parens++;
+    } else if (char == ')') {
+      if (parens > 0) parens--;
+    } else if (char == '[') {
+      brackets++;
+    } else if (char == ']') {
+      if (brackets > 0) brackets--;
+    } else if (parens == 0 && brackets == 0 && char == wanted) {
+      return index;
+    }
+    index++;
+  }
+  return -1;
+}
+
+int _findMatchingBrace(String css, int open) {
+  var depth = 0;
+  var index = open;
+  while (index < css.length) {
+    final char = css[index];
+    if (char == "'" || char == '"') {
+      index = _skipString(css, index);
+      continue;
+    }
+    if (css.startsWith('/*', index)) {
+      final end = css.indexOf('*/', index + 2);
+      index = end < 0 ? css.length : end + 2;
+      continue;
+    }
+    if (char == '{') {
+      depth++;
+    } else if (char == '}') {
+      depth--;
+      if (depth == 0) return index;
+    }
+    index++;
+  }
+  return -1;
+}
+
+int _skipString(String css, int start) {
+  final quote = css[start];
+  var index = start + 1;
+  while (index < css.length) {
+    if (css[index] == '\\') {
+      index += 2;
+      continue;
+    }
+    if (css[index] == quote) return index + 1;
+    index++;
+  }
+  return css.length;
+}
+
+List<String> _splitTopLevel(String value, String separator) {
+  final parts = <String>[];
+  var start = 0;
+  var parens = 0;
+  var brackets = 0;
+  var index = 0;
+  while (index < value.length) {
+    final char = value[index];
+    if (char == "'" || char == '"') {
+      index = _skipString(value, index);
+      continue;
+    }
+    if (char == '(') {
+      parens++;
+    } else if (char == ')') {
+      if (parens > 0) parens--;
+    } else if (char == '[') {
+      brackets++;
+    } else if (char == ']') {
+      if (brackets > 0) brackets--;
+    } else if (parens == 0 && brackets == 0 && char == separator) {
+      parts.add(value.substring(start, index));
+      start = index + 1;
+    }
+    index++;
+  }
+  parts.add(value.substring(start));
+  return parts;
 }

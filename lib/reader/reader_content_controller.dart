@@ -4,6 +4,7 @@ abstract class ReaderViewBackend {
   Future<void> loadChapter(int index, {double progress = 0, String? element});
   Future<void> nextPage();
   Future<void> prevPage();
+  Future<void> goBack();
   Future<void> goToProgress(double progress, {String? element});
   Future<void> toggleAutoScroll();
   Future<void> pauseAutoScroll();
@@ -34,6 +35,9 @@ class ReaderContentController implements ReaderViewBackend {
 
   @override
   Future<void> prevPage() => _backend?.prevPage() ?? Future<void>.value();
+
+  @override
+  Future<void> goBack() => _backend?.goBack() ?? Future<void>.value();
 
   @override
   Future<void> goToProgress(double progress, {String? element}) =>

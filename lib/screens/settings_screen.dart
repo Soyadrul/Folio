@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -42,6 +43,8 @@ class SettingsScreen extends ConsumerWidget {
         padding: const EdgeInsets.only(bottom: 32),
         children: [
           _buildPreviewCard(context, settings, brightness),
+          if (defaultTargetPlatform == TargetPlatform.linux)
+            _buildPlatformNote(context),
 
           // ── Mode ─────────────────────────────────────────────────────
           _buildSection(
@@ -250,6 +253,34 @@ class SettingsScreen extends ConsumerWidget {
   }
 
   // ── Live preview ────────────────────────────────────────────────────────
+
+  Widget _buildPlatformNote(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: kAccentColor.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: kAccentColor.withValues(alpha: 0.25)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.info_outline_rounded, size: 18, color: kAccentColor),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'On Linux the reader always scrolls. Book mode, tap zones, page '
+              'animation and the volume-button settings apply to the Android '
+              'reader only.',
+              style: theme.textTheme.bodySmall?.copyWith(height: 1.35),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _buildPreviewCard(
     BuildContext context,

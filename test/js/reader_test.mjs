@@ -164,6 +164,14 @@ function matches(element, rawSelector) {
       element._id === attribute[2]
     );
   }
+  // Attribute presence, e.g. `a[href]`.
+  const presence = selector.match(/^([a-z0-9-]*)\[([a-z0-9:-]+)\]$/i);
+  if (presence) {
+    return (
+      (presence[1] === '' || element.localName === presence[1]) &&
+      Object.prototype.hasOwnProperty.call(element.attributes, presence[2])
+    );
+  }
   return element.localName === selector.toLowerCase();
 }
 
@@ -186,6 +194,7 @@ function buildDocument() {
   body.appendChild(head);
   documentElement.appendChild(body);
 
+  const listeners = new Map();
   const document = {
     documentElement,
     body,
@@ -198,7 +207,13 @@ function buildDocument() {
       );
       return found || null;
     },
-    addEventListener() {},
+    addEventListener(type, handler) {
+      if (!listeners.has(type)) listeners.set(type, []);
+      listeners.get(type).push(handler);
+    },
+    dispatch(type, event) {
+      for (const handler of listeners.get(type) || []) handler(event);
+    },
     querySelectorAll: (selector) => documentElement.querySelectorAll(selector),
   };
   return { document, viewport, scroller, content, head };
@@ -256,6 +271,19 @@ function addSection(reader, { index = 0, top = 0, height = 1200 } = {}) {
 
 function lastProgress(posts) {
   return posts.filter((post) => post.type === 'progress').at(-1);
+}
+
+function clickEvent(target) {
+  let prevented = false;
+  return {
+    target,
+    preventDefault() {
+      prevented = true;
+    },
+    get defaultPrevented() {
+      return prevented;
+    },
+  };
 }
 
 function defaults(overrides = {}) {
@@ -368,4 +396,189 @@ test('book restore ignores the shell id and uses the saved progress', async () =
 
   assert.equal(scrolledToWrapper, false);
   assert.equal(reader.scroller.scrollLeft, 400);
+});
+
+test('a footnote link scrolls to the note in its own chapter', async () => {
+  const reader = loadReader();
+  reader.scroller.clientWidth = 400;
+  reader.scroller.clientHeight = 600;
+  reader.scroller._rect = { top: 0, bottom: 600, left: 0, right: 400 };
+  reader.folio.init(defaults());
+
+  const first = addSection(reader, { index: 0 });
+  const anchor = reader.document.createElement('a');
+  anchor.setAttribute('href', '#note1');
+  first.appendChild(anchor);
+  const firstNote = reader.document.createElement('aside');
+  firstNote.setAttribute('id', 'note1');
+  firstNote._rect = { top: 300, bottom: 340, left: 0, right: 400 };
+  first.appendChild(firstNote);
+
+  const second = addSection(reader, { index: 1, top: 1200, height: 1200 });
+  const secondNote = reader.document.createElement('aside');
+  secondNote.setAttribute('id', 'note1');
+  secondNote._rect = { top: 1500, bottom: 1540, left: 0, right: 400 };
+  second.appendChild(secondNote);
+
+  let scrolledFirst = false;
+  let scrolledSecond = false;
+  firstNote.onScrollIntoView = () => {
+    scrolledFirst = true;
+  };
+  secondNote.onScrollIntoView = () => {
+    scrolledSecond = true;
+  };
+
+  reader.folio.relayout();
+  await wait(5);
+
+  const event = clickEvent(anchor);
+  reader.document.dispatch('click', event);
+
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(scrolledFirst, true, 'the note in the same chapter is used');
+  assert.equal(scrolledSecond, false, 'a note in another chapter is ignored');
+  assert.ok(
+    reader.posts.some((post) => post.type === 'history' && post.canGoBack === true),
+    'the position before the jump is remembered'
+  );
+});
+
+test('goBack returns to the position from before a footnote jump', async () => {
+  const reader = loadReader();
+  reader.scroller.clientWidth = 400;
+  reader.scroller.clientHeight = 600;
+  reader.scroller._rect = { top: 0, bottom: 600, left: 0, right: 400 };
+  reader.folio.init(defaults());
+
+  const section = addSection(reader, { index: 0 });
+  const anchor = reader.document.createElement('a');
+  anchor.setAttribute('href', '#note1');
+  section.appendChild(anchor);
+  const note = reader.document.createElement('aside');
+  note.setAttribute('id', 'note1');
+  note._rect = { top: 900, bottom: 940, left: 0, right: 400 };
+  section.appendChild(note);
+
+  reader.scroller.scrollTop = 100;
+  note.onScrollIntoView = () => {
+    reader.scroller.scrollTop = 900;
+  };
+
+  reader.folio.relayout();
+  await wait(5);
+
+  reader.document.dispatch('click', clickEvent(anchor));
+  assert.equal(reader.scroller.scrollTop, 900);
+
+  reader.posts.length = 0;
+  reader.folio.goBack();
+
+  assert.equal(reader.scroller.scrollTop, 100);
+  assert.ok(
+    reader.posts.some(
+      (post) => post.type === 'history' && post.canGoBack === false
+    ),
+    'the back button is hidden once the stack is empty'
+  );
+});
+
+test('goBack across chapters asks Dart to restore the previous chapter', async () => {
+  const reader = loadReader();
+  reader.scroller.clientWidth = 400;
+  reader.scroller.clientHeight = 600;
+  reader.scroller._rect = { top: 0, bottom: 600, left: 0, right: 400 };
+  reader.folio.init(defaults());
+
+  const section = addSection(reader, { index: 0 });
+  const anchor = reader.document.createElement('a');
+  anchor.setAttribute(
+    'href',
+    'file:///cache/book/OEBPS/text/ch2.xhtml#sec'
+  );
+  section.appendChild(anchor);
+
+  reader.folio.relayout();
+  await wait(5);
+
+  reader.document.dispatch('click', clickEvent(anchor));
+  assert.ok(reader.posts.some((post) => post.type === 'link'));
+  assert.ok(
+    reader.posts.some((post) => post.type === 'history' && post.canGoBack === true)
+  );
+
+  reader.folio.setChapter({
+    index: 1,
+    html: '',
+    head: '',
+    hasPrev: true,
+    hasNext: false,
+  });
+  await wait(20);
+
+  reader.posts.length = 0;
+  reader.folio.goBack();
+
+  const restore = reader.posts.find((post) => post.type === 'restore');
+  assert.ok(restore, 'asked Dart for the previous chapter');
+  assert.equal(restore.chapterIndex, 0);
+});
+
+test('taps on an anchor without href still turn the page', async () => {
+  const reader = loadReader();
+  reader.scroller.clientWidth = 400;
+  reader.scroller.clientHeight = 600;
+  reader.folio.init(defaults());
+
+  const section = addSection(reader, { index: 0 });
+  const marker = reader.document.createElement('a');
+  marker.setAttribute('id', 'chapter-marker');
+  section.appendChild(marker);
+
+  reader.posts.length = 0;
+  const point = {
+    target: marker,
+    clientX: 200,
+    clientY: 300,
+    pointerType: 'touch',
+    button: 0,
+  };
+  reader.document.dispatch('pointerdown', point);
+  reader.document.dispatch('pointerup', point);
+
+  assert.ok(
+    reader.posts.some(
+      (post) => post.type === 'tapZone' && post.zone === 'middle'
+    ),
+    'the tap was handled instead of being swallowed by the anchor'
+  );
+});
+
+test('taps on an anchor with href do not turn the page', async () => {
+  const reader = loadReader();
+  reader.scroller.clientWidth = 400;
+  reader.scroller.clientHeight = 600;
+  reader.folio.init(defaults());
+
+  const section = addSection(reader, { index: 0 });
+  const link = reader.document.createElement('a');
+  link.setAttribute('href', '#note1');
+  section.appendChild(link);
+
+  reader.posts.length = 0;
+  const point = {
+    target: link,
+    clientX: 200,
+    clientY: 300,
+    pointerType: 'touch',
+    button: 0,
+  };
+  reader.document.dispatch('pointerdown', point);
+  reader.document.dispatch('pointerup', point);
+
+  assert.equal(
+    reader.posts.some((post) => post.type === 'tapZone'),
+    false,
+    'a real link keeps its own behaviour'
+  );
 });

@@ -56,6 +56,8 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
   int _page = 1;
   int _pages = 1;
   int _totalChapters = 0;
+  bool _canGoBack = false;
+  double _lastOverallProgress = 0;
 
   bool _uiVisible = true;
   late final AnimationController _fade;
@@ -177,13 +179,15 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
       if (!mounted) return;
       final chapter = saved?.chapterIndex ?? _chapterIndex;
       final progress = saved?.progress ?? _chapterProgress;
-      final index = chapter.clamp(0, document.chapters.length - 1);
+      final index = chapter.clamp(0, document.documentCount - 1);
       setState(() {
         _document = document;
         _chapterIndex = index;
         _chapterProgress = progress;
         _element = saved?.element;
         _totalChapters = document.chapters.length;
+        _lastOverallProgress =
+            _computeOverallProgress(document, index, progress) ?? 0;
       });
       _syncVolumeKeys(ref.read(settingsNotifierProvider));
     } on EpubException catch (e) {
@@ -219,6 +223,15 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
     // A progress event means the last navigation worked, so any transient
     // error from the previous one is no longer relevant.
     _clearRuntimeError();
+    final document = _document;
+    if (document != null) {
+      final overall = _computeOverallProgress(
+        document,
+        event.chapterIndex,
+        event.progress,
+      );
+      if (overall != null) _lastOverallProgress = overall;
+    }
     setState(() {
       _chapterIndex = event.chapterIndex;
       _chapterProgress = event.progress;
@@ -290,20 +303,27 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
     );
   }
 
-  double get _overallProgress {
-    final document = _document;
-    if (document == null || document.totalChapterBytes == 0) {
-      return 0;
-    }
+  double get _overallProgress => _lastOverallProgress;
+
+  /// Book-wide progress for [index], or null when [index] is an auxiliary page
+  /// that is not part of the reading flow (footnotes, colophon, ...).
+  double? _computeOverallProgress(
+    EpubDocument document,
+    int index,
+    double progress,
+  ) {
+    if (document.totalChapterBytes == 0) return null;
+    final position = document.chapters.indexWhere((c) => c.index == index);
+    if (position < 0) return null;
     var before = 0;
-    for (var i = 0; i < _chapterIndex && i < document.chapters.length; i++) {
+    for (var i = 0; i < position; i++) {
       before += document.chapters[i].byteSize;
     }
-    final current = _chapterIndex < document.chapters.length
-        ? document.chapters[_chapterIndex].byteSize
-        : 0;
-    return ((before + current * _chapterProgress) / document.totalChapterBytes)
-        .clamp(0.0, 1.0);
+    final current = document.chapters[position].byteSize;
+    return ((before + current * progress) / document.totalChapterBytes).clamp(
+      0.0,
+      1.0,
+    );
   }
 
   // ── Build ─────────────────────────────────────────────────────────────────
@@ -479,6 +499,10 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
         if (!mounted) return;
         _showRuntimeError(message);
       },
+      onHistoryChanged: (canGoBack) {
+        if (!mounted || _canGoBack == canGoBack) return;
+        setState(() => _canGoBack = canGoBack);
+      },
     );
   }
 
@@ -592,9 +616,8 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
     Color background,
   ) {
     final document = _document;
-    final title = document != null && _chapterIndex < document.chapters.length
-        ? document.chapters[_chapterIndex].title
-        : widget.book.title;
+    final currentChapter = document?.documentAt(_chapterIndex);
+    final title = currentChapter?.title ?? widget.book.title;
     return Container(
       decoration: BoxDecoration(
         gradient: LinearGradient(
@@ -653,6 +676,12 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
                 tooltip: _autoRunning ? 'Pause scrolling' : 'Start scrolling',
                 onPressed: () => _content.toggleAutoScroll(),
               ),
+            if (_canGoBack)
+              IconButton(
+                icon: Icon(Icons.undo_rounded, color: foreground),
+                tooltip: 'Back to previous location',
+                onPressed: () => _content.goBack(),
+              ),
             IconButton(
               icon: Icon(Icons.format_list_bulleted_rounded, color: foreground),
               tooltip: 'Table of contents',
@@ -677,8 +706,9 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
     Color background,
   ) {
     final percent = (_overallProgress * 100).toStringAsFixed(0);
-    final chapterLabel = _totalChapters > 0
-        ? 'Ch. ${_chapterIndex + 1} / $_totalChapters'
+    final position = _document?.readingOrderPosition(_chapterIndex);
+    final chapterLabel = position != null && _totalChapters > 0
+        ? 'Ch. $position / $_totalChapters'
         : '';
     return Container(
       decoration: BoxDecoration(

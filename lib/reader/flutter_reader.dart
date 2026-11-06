@@ -57,6 +57,12 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
   double _lastScrollPixels = 0;
   int _lastLoadFinishedAt = 0;
 
+  /// The `Html` widget's anchor key. It is replaced on every chapter load so
+  /// anchors from the previous chapter cannot be reused.
+  GlobalKey _anchorKey = GlobalKey();
+
+  final List<_ReaderHistoryEntry> _history = [];
+
   /// A chapter swap moves the scroll position programmatically. Ignore edge
   /// crossings for a moment afterwards so a restored end-of-chapter position
   /// does not immediately turn the page again (the "bounce forward" bug).
@@ -117,7 +123,8 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
   }
 
   Future<void> _load(int index, {double progress = 0, String? element}) async {
-    if (index < 0 || index >= widget.document.chapters.length) return;
+    final chapter = widget.document.documentAt(index);
+    if (chapter == null) return;
     if (_loading) {
       // Fast page turns, volume keys and scroll events must not be dropped:
       // keep the newest request and run it once the current chapter is in.
@@ -127,7 +134,6 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
       return;
     }
     _loading = true;
-    final chapter = widget.document.chapters[index];
     final ChapterContent content;
     try {
       content = await widget.document.loadChapterContent(chapter);
@@ -146,6 +152,7 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
     setState(() {
       _chapterIndex = index;
       _content = content;
+      _anchorKey = GlobalKey();
     });
     widget.callbacks.onChapterChanged?.call(index);
     _restoring = true;
@@ -156,12 +163,8 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
         return;
       }
       _scroll.jumpTo(0);
-      if (progress > 0) {
+      if (!_jumpToAnchor(element) && progress > 0) {
         _scroll.jumpTo(_scroll.position.maxScrollExtent * progress);
-      }
-      if (element != null) {
-        // The Flutter fallback cannot jump to an anchor by id; progress is the
-        // fallback. The WebView path handles element-level restoration.
       }
       _lastScrollPixels = _scroll.position.pixels;
       _autoPosition = _scroll.position.pixels;
@@ -170,6 +173,15 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
       _report(force: true);
       if (widget.settings.scrollAutoStart) startAutoScroll();
     });
+  }
+
+  /// Scrolls to [id] inside the chapter that is currently rendered.
+  bool _jumpToAnchor(String? id) {
+    if (id == null || id.isEmpty) return false;
+    final target = AnchorKey.forId(_anchorKey, id)?.currentContext;
+    if (target == null) return false;
+    Scrollable.ensureVisible(target, alignment: 0, duration: Duration.zero);
+    return true;
   }
 
   /// Ends the current load and starts a request that arrived while it ran.
@@ -209,13 +221,12 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
     if (now - _lastLoadFinishedAt < _boundaryGuard.inMilliseconds) return;
     final position = _scroll.position;
     final max = position.maxScrollExtent;
-    if (direction > 0 &&
-        max > 0 &&
-        position.pixels >= max - 1 &&
-        _chapterIndex + 1 < widget.document.chapters.length) {
-      _load(_chapterIndex + 1);
-    } else if (direction < 0 && position.pixels <= 1 && _chapterIndex > 0) {
-      _load(_chapterIndex - 1, progress: 1);
+    if (direction > 0 && max > 0 && position.pixels >= max - 1) {
+      final next = widget.document.nextReadingIndex(_chapterIndex);
+      if (next != null) _load(next);
+    } else if (direction < 0 && position.pixels <= 1) {
+      final previous = widget.document.previousReadingIndex(_chapterIndex);
+      if (previous != null) _load(previous, progress: 1);
     }
   }
 
@@ -268,8 +279,9 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
     if (!_scroll.hasClients) return;
     final position = _scroll.position;
     if (position.pixels >= position.maxScrollExtent - 1) {
-      if (_chapterIndex + 1 < widget.document.chapters.length) {
-        await _load(_chapterIndex + 1);
+      final next = widget.document.nextReadingIndex(_chapterIndex);
+      if (next != null) {
+        await _load(next);
       } else {
         widget.callbacks.onBoundary?.call(1);
       }
@@ -292,8 +304,9 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
     if (!_scroll.hasClients) return;
     final position = _scroll.position;
     if (position.pixels <= 1) {
-      if (_chapterIndex > 0) {
-        await _load(_chapterIndex - 1, progress: 1);
+      final previous = widget.document.previousReadingIndex(_chapterIndex);
+      if (previous != null) {
+        await _load(previous, progress: 1);
       } else {
         widget.callbacks.onBoundary?.call(-1);
       }
@@ -314,9 +327,36 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
   @override
   Future<void> goToProgress(double progress, {String? element}) async {
     if (!_scroll.hasClients) return;
+    if (_jumpToAnchor(element)) return;
     _scroll.jumpTo(
       (_scroll.position.maxScrollExtent * progress.clamp(0.0, 1.0)),
     );
+  }
+
+  double get _currentProgress {
+    if (!_scroll.hasClients) return 0;
+    final max = _scroll.position.maxScrollExtent;
+    return max <= 0 ? 0 : (_scroll.position.pixels / max).clamp(0.0, 1.0);
+  }
+
+  void _pushHistory() {
+    if (_content == null) return;
+    _history.add(
+      _ReaderHistoryEntry(
+        chapterIndex: _chapterIndex,
+        progress: _currentProgress,
+      ),
+    );
+    if (_history.length > 50) _history.removeAt(0);
+    widget.callbacks.onHistoryChanged?.call(true);
+  }
+
+  @override
+  Future<void> goBack() async {
+    if (_history.isEmpty) return;
+    final entry = _history.removeLast();
+    widget.callbacks.onHistoryChanged?.call(_history.isNotEmpty);
+    await _load(entry.chapterIndex, progress: entry.progress);
   }
 
   @override
@@ -371,62 +411,135 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
       systemBrightness: brightness,
     );
 
-    return Scrollbar(
-      controller: _scroll,
-      child: SingleChildScrollView(
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onTapUp: _onTapUp,
+      onLongPress: () => widget.callbacks.onToggleChrome?.call(),
+      onHorizontalDragEnd: (details) {
+        if (!widget.settings.swipeToTurnPage ||
+            widget.settings.readerMode != ReaderMode.book) {
+          return;
+        }
+        final velocity = details.primaryVelocity ?? 0;
+        if (velocity < -200) {
+          nextPage();
+        } else if (velocity > 200) {
+          prevPage();
+        }
+      },
+      child: Scrollbar(
         controller: _scroll,
-        padding: EdgeInsets.symmetric(
-          horizontal: widget.settings.marginHorizontal,
-          vertical: 8,
-        ),
-        child: Html(
-          data: content.bodyHtml,
-          style: {
-            'body': Style(
-              margin: Margins.zero,
-              padding: HtmlPaddings.zero,
-              textAlign: widget.settings.textAlign,
-            ).merge(Style.fromTextStyle(bodyStyle)),
-            'p': Style(margin: Margins.only(bottom: 10)),
-          },
-          onLinkTap: (url, attributes, element) {
-            if (url == null) return;
-            final uri = Uri.tryParse(url);
-            if (uri == null || uri.scheme != 'file') return;
-            final chapter = widget.document.chapters
-                .where((c) => p.equals(c.path, uri.toFilePath()))
-                .firstOrNull;
-            if (chapter != null) {
+        child: SingleChildScrollView(
+          controller: _scroll,
+          // Leave room for the chrome: on Linux it floats over the content
+          // instead of taking part in the Scaffold layout.
+          padding: EdgeInsets.fromLTRB(
+            widget.settings.marginHorizontal,
+            56,
+            widget.settings.marginHorizontal,
+            80,
+          ),
+          child: Html(
+            anchorKey: _anchorKey,
+            data: '${content.bookStyleHtml}${content.bodyHtml}',
+            style: {
+              'body': Style(
+                margin: Margins.zero,
+                padding: HtmlPaddings.zero,
+                textAlign: widget.settings.textAlign,
+                backgroundColor: Colors.transparent,
+              ).merge(Style.fromTextStyle(bodyStyle)),
+              'html': Style(backgroundColor: Colors.transparent),
+              'p': Style(margin: Margins.only(bottom: 10)),
+            },
+            onLinkTap: (url, attributes, element) {
+              if (url == null) return;
+              final uri = Uri.tryParse(url);
+              if (uri == null) return;
+              if (uri.scheme == 'http' || uri.scheme == 'https') {
+                widget.callbacks.onError?.call(
+                  'External links are not opened by Folio.',
+                );
+                return;
+              }
+              if (uri.scheme != 'file') return;
+              final chapter = widget.document.allDocuments
+                  .where((c) => p.equals(c.path, uri.toFilePath()))
+                  .firstOrNull;
+              if (chapter == null) {
+                widget.callbacks.onError?.call(
+                  'This link points outside the book.',
+                );
+                return;
+              }
+              _pushHistory();
               _load(
                 chapter.index,
                 element: uri.fragment.isEmpty ? null : uri.fragment,
               );
-            }
-          },
-          extensions: [
-            TagExtension(
-              tagsToExtend: {'img'},
-              builder: (imageContext) {
-                final src = imageContext.attributes['src'];
-                final uri = src == null ? null : Uri.tryParse(src);
-                if (uri == null || uri.scheme != 'file') {
-                  return const SizedBox.shrink();
-                }
-                final file = File(uri.toFilePath());
-                if (!file.existsSync()) return const SizedBox.shrink();
-                return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 6),
-                  child: Image.file(
-                    file,
-                    fit: BoxFit.contain,
-                    errorBuilder: (_, _, _) => const SizedBox.shrink(),
-                  ),
-                );
-              },
-            ),
-          ],
+            },
+            extensions: [
+              TagExtension(
+                tagsToExtend: {'img'},
+                builder: (imageContext) {
+                  final src = imageContext.attributes['src'];
+                  final uri = src == null ? null : Uri.tryParse(src);
+                  if (uri == null || uri.scheme != 'file') {
+                    return const SizedBox.shrink();
+                  }
+                  final file = File(uri.toFilePath());
+                  if (!file.existsSync()) return const SizedBox.shrink();
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    child: Image.file(
+                      file,
+                      fit: BoxFit.contain,
+                      errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
+
+  void _onTapUp(TapUpDetails details) {
+    final width = context.size?.width ?? 0;
+    if (widget.settings.readerMode == ReaderMode.book &&
+        widget.settings.tapZones &&
+        width > 0) {
+      final zone = (widget.settings.tapZoneWidth / 100).clamp(0.15, 0.45);
+      final x = details.localPosition.dx / width;
+      if (x < zone) {
+        prevPage();
+        return;
+      }
+      if (x > 1 - zone) {
+        nextPage();
+        return;
+      }
+      widget.callbacks.onToggleChrome?.call();
+      return;
+    }
+    if (widget.settings.readerMode == ReaderMode.scroll &&
+        widget.settings.tapToStartStop) {
+      toggleAutoScroll();
+      return;
+    }
+    widget.callbacks.onToggleChrome?.call();
+  }
+}
+
+/// One position the Linux reader can return to after following a link.
+class _ReaderHistoryEntry {
+  const _ReaderHistoryEntry({
+    required this.chapterIndex,
+    required this.progress,
+  });
+
+  final int chapterIndex;
+  final double progress;
 }

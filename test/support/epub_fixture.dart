@@ -59,6 +59,18 @@ const chapterTwo = '''
 <body><h1 id="sec">Chapter Two</h1><p>Second chapter.</p></body></html>
 ''';
 
+const notesPage = '''
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><title>Notes</title></head>
+<body><aside id="n1"><p>First note.</p></aside></body></html>
+''';
+
+const endnotesPage = '''
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><title>Endnotes</title></head>
+<body><aside id="e1"><p>An endnote.</p></aside></body></html>
+''';
+
 const bookCss = 'body { font-family: serif; }';
 
 const epub2Opf = '''
@@ -75,13 +87,15 @@ const epub2Opf = '''
     <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
     <item id="ch1" href="text/ch1.xhtml" media-type="application/xhtml+xml"/>
     <item id="ch2" href="text/ch2.xhtml" media-type="application/xhtml+xml"/>
+    <item id="notes" href="text/notes.xhtml" media-type="application/xhtml+xml"/>
+    <item id="endnotes" href="text/endnotes.xhtml" media-type="application/xhtml+xml"/>
     <item id="cover-img" href="images/Cover.JPG" media-type="image/jpeg"/>
     <item id="css" href="style/book.css" media-type="text/css"/>
   </manifest>
   <spine toc="ncx">
     <itemref idref="ch1"/>
     <itemref idref="ch2"/>
-    <itemref idref="skipped" linear="no"/>
+    <itemref idref="notes" linear="no"/>
   </spine>
   <guide>
     <reference type="cover" href="text/ch1.xhtml" title="Cover"/>
@@ -105,12 +119,17 @@ const epub2Ncx = '''
 </ncx>
 ''';
 
-Map<String, String> epub2Entries({String opf = epub2Opf}) => {
+Map<String, String> epub2Entries({
+  String opf = epub2Opf,
+  String ncx = epub2Ncx,
+}) => {
   'META-INF/container.xml': containerXml,
   'OEBPS/content.opf': opf,
-  'OEBPS/toc.ncx': epub2Ncx,
+  'OEBPS/toc.ncx': ncx,
   'OEBPS/text/ch1.xhtml': chapterOne,
   'OEBPS/text/ch2.xhtml': chapterTwo,
+  'OEBPS/text/notes.xhtml': notesPage,
+  'OEBPS/text/endnotes.xhtml': endnotesPage,
   'OEBPS/style/book.css': bookCss,
   'OEBPS/images/Cover.JPG': 'cover-bytes',
   'OEBPS/images/pic.jpg': 'pic-bytes',

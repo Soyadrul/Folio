@@ -43,6 +43,7 @@ class ReaderCallbacks {
     this.onBoundary,
     this.onReady,
     this.onError,
+    this.onHistoryChanged,
   });
 
   final void Function(ReaderProgressEvent event)? onProgress;
@@ -53,6 +54,10 @@ class ReaderCallbacks {
   final void Function(int direction)? onBoundary;
   final VoidCallback? onReady;
   final void Function(String message)? onError;
+
+  /// Whether the reader can jump back to a position it visited by following a
+  /// link or a table-of-contents entry.
+  final void Function(bool canGoBack)? onHistoryChanged;
 }
 
 /// The Android reader: one WebView shell that receives chapter HTML from Dart.
@@ -297,10 +302,10 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
   }
 
   Future<ChapterContent?> _contentFor(int index) async {
-    if (index < 0 || index >= widget.document.chapters.length) return null;
+    final chapter = widget.document.documentAt(index);
+    if (chapter == null) return null;
     final cached = _chapterCache[index];
     if (cached != null) return cached;
-    final chapter = widget.document.chapters[index];
     final content = await widget.document.loadChapterContent(chapter);
     _chapterCache[index] = content;
     while (_chapterCache.length > _cacheLimit) {
@@ -321,12 +326,12 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
     return {
       'index': index,
       'html': content.bodyHtml,
-      'head': content.headHtml,
+      'head': content.webStyleHtml,
       'bodyClass': content.bodyClass,
       'bodyStyle': content.bodyStyle,
       'language': content.language,
-      'hasPrev': index > 0,
-      'hasNext': index < widget.document.chapters.length - 1,
+      'hasPrev': widget.document.previousReadingIndex(index) != null,
+      'hasNext': widget.document.nextReadingIndex(index) != null,
       'progress': progress,
       'element': element,
     };
@@ -337,7 +342,7 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
     double progress = 0,
     String? element,
   }) async {
-    if (index < 0 || index >= widget.document.chapters.length) return;
+    if (widget.document.documentAt(index) == null) return;
     if (_loadingChapter) {
       // A fast page-turn or volume press arrived while the previous chapter
       // was still loading; run it as soon as the current one is installed.
@@ -397,8 +402,10 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
   }
 
   Future<void> _appendOrPrepend(int direction) async {
-    final target = _currentChapter + direction;
-    if (target < 0 || target >= widget.document.chapters.length) return;
+    final target = direction > 0
+        ? widget.document.nextReadingIndex(_currentChapter)
+        : widget.document.previousReadingIndex(_currentChapter);
+    if (target == null) return;
     final content = await _contentFor(target);
     if (content == null || _controller == null) return;
     final payload = _payload(target, content);
@@ -412,12 +419,12 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
     final uri = Uri.tryParse(href);
     if (uri == null) return;
     if (uri.scheme == 'http' || uri.scheme == 'https') {
-      debugPrint('Folio: ignoring external link $href');
+      widget.callbacks.onError?.call('External links are not opened by Folio.');
       return;
     }
     final link = parseFileLink(href);
     if (link == null) return;
-    final chapter = widget.document.chapters
+    final chapter = widget.document.allDocuments
         .where((c) => p.equals(c.path, link.path))
         .firstOrNull;
     if (chapter == null) {
@@ -456,17 +463,19 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
         );
         break;
       case 'atEnd':
-        if (_currentChapter + 1 >= widget.document.chapters.length) {
+        final next = widget.document.nextReadingIndex(_currentChapter);
+        if (next == null) {
           widget.callbacks.onBoundary?.call(1);
         } else {
-          await _loadChapter(_currentChapter + 1, progress: 0);
+          await _loadChapter(next, progress: 0);
         }
         break;
       case 'atStart':
-        if (_currentChapter - 1 < 0) {
+        final previous = widget.document.previousReadingIndex(_currentChapter);
+        if (previous == null) {
           widget.callbacks.onBoundary?.call(-1);
         } else {
-          await _loadChapter(_currentChapter - 1, progress: 1);
+          await _loadChapter(previous, progress: 1);
         }
         break;
       case 'needChapter':
@@ -477,6 +486,18 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
       case 'link':
         final href = message['href'] as String?;
         if (href != null) await _handleLink(href);
+        break;
+      case 'history':
+        widget.callbacks.onHistoryChanged?.call(message['canGoBack'] == true);
+        break;
+      case 'restore':
+        final index = (message['chapterIndex'] as num?)?.toInt();
+        if (index == null) break;
+        await _loadChapter(
+          index,
+          progress: (message['progress'] as num?)?.toDouble() ?? 0,
+          element: message['element'] as String?,
+        );
         break;
       case 'toggleChrome':
       case 'tapZone':
@@ -520,6 +541,11 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
   @override
   Future<void> prevPage() async {
     await _controller?.evaluateJavascript(source: 'folio.prevPage();');
+  }
+
+  @override
+  Future<void> goBack() async {
+    await _controller?.evaluateJavascript(source: 'folio.goBack();');
   }
 
   @override
