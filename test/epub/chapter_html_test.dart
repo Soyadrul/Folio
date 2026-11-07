@@ -291,7 +291,15 @@ void main() {
       );
       expect(
         scopeBookCss('body > .x { color: red }', scope),
-        '$scope.x{ color: red }',
+        '$scope .x{ color: red }',
+      );
+      expect(
+        scopeBookCss('body .note { color: red }', scope),
+        '$scope .note{ color: red }',
+      );
+      expect(
+        scopeBookCss('body.note { color: red }', scope),
+        '$scope.note{ color: red }',
       );
     });
 
@@ -375,6 +383,7 @@ void main() {
         contains('.folio-chapter[data-folio-index="2"] p.note'),
       );
       expect(prepared.webStyleHtml, isNot(contains('@import')));
+      expect(prepared.webStyleHtml, isNot(contains(');')));
       expect(prepared.webStyleHtml, contains('font-family: serif'));
       expect(
         prepared.webStyleHtml,

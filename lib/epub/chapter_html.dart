@@ -484,8 +484,11 @@ String _stripRemoteImports(String css) {
 /// an unscoped import would leak rules into the reader chrome and other
 /// chapters.
 String _stripAllImports(String css) {
+  // Match the whole rule, including the closing `)` of `url(...)` and any
+  // media query that follows it. Leaving a stray `);` behind would make the
+  // next rule's selector invalid, silently dropping real book styles.
   final pattern = RegExp(
-    r'''@import\s+(?:url\(\s*)?(?:["'][^"']*["']|[^;]*)\s*;?''',
+    r'''@import\s+(?:url\([^)]*\)\s*|["'][^"']*["']\s*)?[^;]*;?''',
     caseSensitive: false,
   );
   return css.replaceAll(pattern, '');
@@ -640,9 +643,15 @@ String _scopeSelector(String raw, String scope) {
 }
 
 /// Turns `body`, `html`, `:root`, `html body p`, ... into `scope ...`.
+///
+/// A selector attached directly to the root (`body.note`) keeps that class on
+/// the scope element; a descendant selector (`html body p`, `body > .note`)
+/// becomes a descendant of the scope. Collapsing the two would make rules
+/// like `body .note` style the chapter section itself instead of the note.
 String _replaceRootSelector(String selector, String scope) {
   var rest = selector;
   var matched = false;
+  var descendant = false;
   while (true) {
     final match = RegExp(
       r'^(?:html|body|:root)(?=$|[\s>+~.#:\[])',
@@ -650,15 +659,26 @@ String _replaceRootSelector(String selector, String scope) {
     ).firstMatch(rest);
     if (match == null) break;
     matched = true;
-    rest = rest.substring(match.end).trimLeft();
-    if (rest.startsWith('>')) rest = rest.substring(1).trimLeft();
+    var remainder = rest.substring(match.end);
+    final separated = remainder.isNotEmpty && remainder[0].trim().isEmpty;
+    remainder = remainder.trimLeft();
+    if (remainder.startsWith('>') ||
+        remainder.startsWith('+') ||
+        remainder.startsWith('~')) {
+      descendant = true;
+      remainder = remainder.substring(1).trimLeft();
+    } else if (separated) {
+      descendant = true;
+    }
+    rest = remainder;
   }
   if (!matched) return selector;
   if (rest.isEmpty) return scope;
-  if (rest.startsWith('.') ||
-      rest.startsWith('#') ||
-      rest.startsWith('[') ||
-      rest.startsWith(':')) {
+  if (!descendant &&
+      (rest.startsWith('.') ||
+          rest.startsWith('#') ||
+          rest.startsWith('[') ||
+          rest.startsWith(':'))) {
     return '$scope$rest';
   }
   return '$scope $rest';

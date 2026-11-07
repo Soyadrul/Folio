@@ -277,11 +277,14 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
   Future<void> _ensureFontFaces() async {
     final family = widget.settings.fontFamily;
     if (_fontFacesFamily == family) return;
+    final controller = _controller;
+    // Do not record the family yet: the shell may already have been built with
+    // the previous one and has not loaded, so `_onLoadStop` must still inject
+    // the new rules once it is ready.
+    if (controller == null || !_shellReady) return;
     final css = await readerFontFaceCss(family);
     if (!mounted || widget.settings.fontFamily != family) return;
     _fontFacesFamily = family;
-    final controller = _controller;
-    if (controller == null || !_shellReady) return;
     await controller.evaluateJavascript(
       source: 'folio.setFontFaces(${jsonEncode(css)});',
     );
@@ -380,7 +383,8 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
       );
 
       // Warm the next chapter without blocking the current one.
-      unawaited(_contentFor(index + 1));
+      final next = widget.document.nextReadingIndex(index);
+      if (next != null) unawaited(_contentFor(next));
     } finally {
       _loadingChapter = false;
       final pending = _pendingChapter;

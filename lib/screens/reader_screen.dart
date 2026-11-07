@@ -186,8 +186,13 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
         _chapterProgress = progress;
         _element = saved?.element;
         _totalChapters = document.chapters.length;
+        // Following a footnote can leave the saved position on an auxiliary
+        // page, which has no progress of its own. Keep the last whole-book
+        // progress instead of resetting the library card to zero.
         _lastOverallProgress =
-            _computeOverallProgress(document, index, progress) ?? 0;
+            _computeOverallProgress(document, index, progress) ??
+            saved?.overallProgress ??
+            0;
       });
       _syncVolumeKeys(ref.read(settingsNotifierProvider));
     } on EpubException catch (e) {
