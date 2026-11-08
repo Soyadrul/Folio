@@ -1,9 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <full-backup-content>
-    <!-- Backup all shared preferences and files by default -->
+    <!-- Only the small settings file is worth restoring. Extracted EPUBs live
+         in the cache directory and absolute library paths are re-validated on
+         startup, so neither the `file` nor `external` domain is backed up. -->
     <include domain="sharedpref" path="." />
-    <include domain="file" path="." />
-    
-    <!-- Exclude sensitive data if needed in the future -->
-    <!-- <exclude domain="sharedpref" path="sensitive_data.xml" /> -->
 </full-backup-content>

@@ -8,14 +8,17 @@
                          need MANAGE_EXTERNAL_STORAGE or use SAF (file_picker
                          already uses SAF on 13+, so the permission is only a
                          fallback for older devices).
+
+         Play policy: MANAGE_EXTERNAL_STORAGE ("All files access") is a
+         restricted permission. If Folio is published on Google Play, the
+         declaration must be justified as a file manager / document reader, or
+         the permission must be dropped in favour of SAF-only access. Keep this
+         note in sync with the Play Console declaration.
     ─────────────────────────────────────────────────────────────────────── -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
         tools:ignore="ScopedStorage" />
-
-    <!-- Keep screen on (optional, controlled by settings) -->
-    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <!-- Internet is needed only by google_fonts to download fonts on first run.
          Once cached they work offline. -->
@@ -74,14 +77,16 @@
             </intent-filter>
         </activity>
 
-        <!-- Required by flutter_local_notifications / keep-screen-on -->
+        <!-- Flutter embedding metadata (not a notification/keep-screen flag;
+             the reader's screen flag is set from MainActivity). -->
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
 
     </application>
 
-    <!-- Required by tools:ignore attribute above -->
+    <!-- permission_handler is compiled against a newer SDK than some devices
+         targeted by the app; allow it to be linked. -->
     <uses-sdk tools:overrideLibrary="io.flutter.plugins.permissionhandler" />
 
 </manifest>

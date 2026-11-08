@@ -37,6 +37,8 @@
     },
     touch: null,
     lastReport: 0,
+    progressTimer: 0,
+    lastNeed: null,
     suppressScroll: false,
     pending: null,
     missing: [],
@@ -89,7 +91,13 @@
     root.style.setProperty('--folio-fg', s.foreground);
     root.style.setProperty('--folio-align', s.textAlign);
     root.style.setProperty('--folio-font-family', s.fontFamily);
-    root.style.setProperty('--folio-hyphens', s.hyphenation ? 'auto' : 'manual');
+    // Hyphenation only helps justified text, and the Settings switch is
+    // disabled for other alignments. Keep the CSS in step with the UI so the
+    // WebView cannot hyphenate when the user turned it off.
+    root.style.setProperty(
+      '--folio-hyphens',
+      s.hyphenation && s.textAlign === 'justify' ? 'auto' : 'manual'
+    );
     root.style.setProperty('--folio-page-width', size.width + 'px');
     root.style.setProperty('--folio-page-height', size.height + 'px');
     root.style.setProperty('--folio-image-max-height', (size.height * 0.96) + 'px');
@@ -157,10 +165,12 @@
     if (isBook()) {
       return state.pages > 1 ? state.page / (state.pages - 1) : 0;
     }
-    const size = viewportSize();
-    const top = el.offsetTop;
-    const height = Math.max(1, el.offsetHeight);
-    return clamp((scroller().scrollTop - top) / height, 0, 1);
+    // The chapter can only scroll through `height - viewport` pixels. Using
+    // the full height here made the value stop short of 1.0 and made a restore
+    // land up to one screen away from the saved position.
+    const range = Math.max(0, el.offsetHeight - viewportSize().height);
+    if (range <= 0) return 0;
+    return clamp((scroller().scrollTop - el.offsetTop) / range, 0, 1);
   }
 
   function visibleElementId() {
@@ -191,10 +201,9 @@
     return null;
   }
 
-  function reportProgress(force) {
-    const now = Date.now();
-    if (!force && now - state.lastReport < 120) return;
-    state.lastReport = now;
+  function postProgress() {
+    state.lastReport = Date.now();
+    state.progressTimer = 0;
     post('progress', {
       chapterIndex: state.index,
       progress: chapterProgress(),
@@ -202,6 +211,27 @@
       pages: state.pages,
       element: visibleElementId(),
     });
+  }
+
+  function reportProgress(force) {
+    if (force) {
+      clearTimeout(state.progressTimer);
+      state.progressTimer = 0;
+      postProgress();
+      return;
+    }
+    const elapsed = Date.now() - state.lastReport;
+    if (elapsed >= 120) {
+      clearTimeout(state.progressTimer);
+      state.progressTimer = 0;
+      postProgress();
+      return;
+    }
+    // Throttling must not drop the last event: without a trailing call the
+    // final scroll position before the user stops could be skipped, and the
+    // saved position would be a little behind the text on screen.
+    clearTimeout(state.progressTimer);
+    state.progressTimer = setTimeout(postProgress, 120 - elapsed);
   }
 
   function pushHistory() {
@@ -239,6 +269,10 @@
         : null;
       if (target) {
         target.scrollIntoView({ block: 'start', behavior: 'auto' });
+        if (isBook()) {
+          computeLayout();
+          alignBookPage();
+        }
         reportProgress(true);
         return;
       }
@@ -258,6 +292,23 @@
     if (!entry) return;
     post('history', { canGoBack: state.history.length > 0 });
     restoreHistoryEntry(entry);
+  }
+
+  // Scroll events fire continuously while a chapter loads. Without this
+  // debounce every frame posted another `needChapter` for the same direction.
+  function requestChapter(direction, index) {
+    const now = Date.now();
+    const last = state.lastNeed;
+    if (
+      last &&
+      last.direction === direction &&
+      last.index === index &&
+      now - last.time < 250
+    ) {
+      return;
+    }
+    state.lastNeed = { direction: direction, index: index, time: now };
+    post('needChapter', { direction: direction, chapterIndex: index });
   }
 
   function trimSections() {
@@ -315,7 +366,7 @@
       const remaining =
         scroller().scrollHeight - scroller().clientHeight - scroller().scrollTop;
       if (remaining < size.height * 2) {
-        post('needChapter', { direction: 1, chapterIndex: state.index });
+        requestChapter(1, state.index);
       }
     }
   }
@@ -348,6 +399,24 @@
       pages: state.pages,
     });
     reportProgress(true);
+  }
+
+  // `scrollIntoView` can stop at the left edge of a narrow anchor instead of
+  // the start of the page it sits on. Snap to the nearest whole page so the
+  // paginated layout never shows two half-pages.
+  function alignBookPage() {
+    if (!isBook()) return;
+    const width = Math.max(1, viewportSize().width);
+    const pages = Math.max(1, Math.ceil(content().scrollWidth / width));
+    state.pages = pages;
+    const page = clamp(Math.round(scroller().scrollLeft / width), 0, pages - 1);
+    state.page = page;
+    scroller().scrollLeft = page * width;
+    post('pages', {
+      chapterIndex: state.index,
+      page: displayPage(),
+      pages: state.pages,
+    });
   }
 
   function nextPage() {
@@ -391,7 +460,12 @@
         : null;
       if (target && content().contains(target)) {
         target.scrollIntoView({ block: 'start', behavior: 'auto' });
-        computeLayout();
+        if (isBook()) {
+          computeLayout();
+          alignBookPage();
+        } else {
+          computeLayout();
+        }
         reportProgress(true);
         return;
       }
@@ -402,7 +476,8 @@
     } else {
       const el = currentSection();
       if (!el) return;
-      scroller().scrollTop = el.offsetTop + p * Math.max(1, el.offsetHeight - viewportSize().height);
+      const range = Math.max(0, el.offsetHeight - viewportSize().height);
+      scroller().scrollTop = el.offsetTop + p * range;
       reportProgress(true);
     }
   }
@@ -418,6 +493,7 @@
     state.section = null;
     state.page = isBook() ? 0 : 1;
     state.pages = 1;
+    state.lastNeed = null;
   }
 
   function makeSection(payload) {
@@ -443,59 +519,116 @@
     }
   }
 
-  function setChapter(payload) {
-    state.pending = null;
-    if (state.auto.running) pauseAutoScroll();
-    clearContent();
-    applyHead(payload);
-    const el = makeSection(payload);
-    content().appendChild(el);
-    state.index = payload.index;
-    state.loadedStart = payload.index;
-    state.loadedEnd = payload.index;
-    state.hasPrev = !!payload.hasPrev;
-    state.hasNext = !!payload.hasNext;
-    state.section = el;
-    scroller().scrollTop = 0;
-    scroller().scrollLeft = 0;
-    applyCssVariables();
-    requestAnimationFrame(function () {
-      requestAnimationFrame(function () {
-        computeLayout();
-        if (payload.progress || payload.element) {
-          goToProgress(payload.progress || 0, payload.element);
-        }
-        // Always leave a final progress event after the restore, so the host
-        // never persists the position from before the jump.
-        reportProgress(true);
-        if (
-          state.settings.autoStart &&
-          !isBook() &&
-          !state.auto.started
-        ) {
-          startAutoScroll();
-        }
-        post('chapterReady', { chapterIndex: payload.index });
-      });
+  // A chapter arrives in three steps (`startChapter`, one or more
+  // `appendChapterHtml` calls, `endChapter`) so a very large chapter never has
+  // to cross the JavaScript bridge as one huge string.
+  const chapterTransfer = {
+    target: null,
+    payload: null,
+    html: '',
+    element: null,
+  };
+
+  function makeEmptySection(payload) {
+    return makeSection({
+      index: payload.index,
+      html: '',
+      bodyClass: payload.bodyClass,
+      bodyStyle: payload.bodyStyle,
+      language: payload.language,
     });
   }
 
-  function appendChapter(payload) {
-    if (sectionFor(payload.index)) return;
-    const el = makeSection(payload);
-    content().appendChild(el);
-    mergeHead(payload);
-    state.loadedEnd = payload.index;
-    state.hasNext = !!payload.hasNext;
-    // If auto-scroll is running, let it continue into the new content.
-    if (state.auto.running) state.auto.pos = scroller().scrollTop;
-    post('chapterAppended', { chapterIndex: payload.index });
-    relayout(60);
+  function startChapter(payload) {
+    const target =
+      payload.target === 'append' || payload.target === 'prepend'
+        ? payload.target
+        : 'replace';
+    chapterTransfer.target = target;
+    chapterTransfer.payload = payload;
+    chapterTransfer.html = '';
+    chapterTransfer.element = null;
+
+    if (target === 'replace') {
+      state.pending = null;
+      if (state.auto.running) pauseAutoScroll();
+      clearContent();
+      applyHead(payload);
+      const el = makeEmptySection(payload);
+      content().appendChild(el);
+      state.index = payload.index;
+      state.loadedStart = payload.index;
+      state.loadedEnd = payload.index;
+      state.hasPrev = !!payload.hasPrev;
+      state.hasNext = !!payload.hasNext;
+      state.section = el;
+      scroller().scrollTop = 0;
+      scroller().scrollLeft = 0;
+      applyCssVariables();
+      chapterTransfer.element = el;
+      return;
+    }
+
+    // The chapter is already on the page (a duplicate request); ignore it.
+    if (sectionFor(payload.index)) {
+      chapterTransfer.target = null;
+      return;
+    }
+    chapterTransfer.element = makeEmptySection(payload);
   }
 
-  function prependChapter(payload) {
-    if (sectionFor(payload.index)) return;
-    const el = makeSection(payload);
+  function appendChapterHtml(chunk) {
+    if (!chapterTransfer.target) return;
+    chapterTransfer.html += chunk;
+  }
+
+  function endChapter() {
+    const target = chapterTransfer.target;
+    const payload = chapterTransfer.payload;
+    const el = chapterTransfer.element;
+    const html = chapterTransfer.html;
+    chapterTransfer.target = null;
+    chapterTransfer.payload = null;
+    chapterTransfer.html = '';
+    chapterTransfer.element = null;
+    if (!target || !el) return;
+    el.innerHTML = html;
+
+    if (target === 'replace') {
+      requestAnimationFrame(function () {
+        requestAnimationFrame(function () {
+          computeLayout();
+          if (payload.progress || payload.element) {
+            goToProgress(payload.progress || 0, payload.element);
+          }
+          // Always leave a final progress event after the restore, so the host
+          // never persists the position from before the jump.
+          reportProgress(true);
+          if (
+            state.settings.autoStart &&
+            !isBook() &&
+            !state.auto.started
+          ) {
+            startAutoScroll();
+          }
+          post('chapterReady', { chapterIndex: payload.index });
+        });
+      });
+      return;
+    }
+
+    if (target === 'append') {
+      content().appendChild(el);
+      mergeHead(payload);
+      state.loadedEnd = payload.index;
+      state.hasNext = !!payload.hasNext;
+      // If auto-scroll is running, let it continue into the new content.
+      if (state.auto.running) state.auto.pos = scroller().scrollTop;
+      post('chapterAppended', { chapterIndex: payload.index });
+      relayout(60);
+      return;
+    }
+
     const current = content().firstElementChild;
     const before = scroller().scrollHeight;
     content().insertBefore(el, current);
@@ -509,6 +642,24 @@
     }
     post('chapterPrepended', { chapterIndex: payload.index });
     relayout(60);
+  }
+
+  function setChapter(payload) {
+    startChapter(payload);
+    appendChapterHtml(payload.html || '');
+    endChapter();
+  }
+
+  function appendChapter(payload) {
+    startChapter(Object.assign({}, payload, { target: 'append' }));
+    appendChapterHtml(payload.html || '');
+    endChapter();
+  }
+
+  function prependChapter(payload) {
+    startChapter(Object.assign({}, payload, { target: 'prepend' }));
+    appendChapterHtml(payload.html || '');
+    endChapter();
   }
 
   function applySettings(settings) {
@@ -698,14 +849,14 @@
       !sectionFor(state.index + 1) &&
       scroller().scrollTop + size.height * 2.5 >= max
     ) {
-      post('needChapter', { direction: 1, chapterIndex: state.index });
+      requestChapter(1, state.index);
     }
     if (
       state.hasPrev &&
       !sectionFor(state.index - 1) &&
       scroller().scrollTop < size.height * 1.2
     ) {
-      post('needChapter', { direction: -1, chapterIndex: state.index });
+      requestChapter(-1, state.index);
     }
     reportProgress(false);
   }
@@ -747,6 +898,10 @@
       // the link does not strand them at the end of the chapter.
       pushHistory();
       target.scrollIntoView({ block: 'start', behavior: 'auto' });
+      if (isBook()) {
+        computeLayout();
+        alignBookPage();
+      }
       reportProgress(true);
       return;
     }
@@ -805,6 +960,9 @@
     setSettings: applySettings,
     setFontFaces: setFontFaces,
     setChapter: setChapter,
+    startChapter: startChapter,
+    appendChapterHtml: appendChapterHtml,
+    endChapter: endChapter,
     appendChapter: appendChapter,
     prependChapter: prependChapter,
     nextPage: nextPage,

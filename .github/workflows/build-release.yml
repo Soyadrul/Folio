@@ -161,11 +161,51 @@ jobs:
         echo "✅ Release version will be: $VERSION"
 
   # ============================================================================
+  # JOB 1.5: Static analysis and tests (quality gate)
+  # ============================================================================
+  quality:
+    name: Analyze and test
+    needs: check-trigger
+    if: needs.check-trigger.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v6
+
+    - name: Set up Flutter SDK
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.47.7'
+        channel: 'stable'
+        cache: true
+
+    - name: Get Flutter dependencies
+      run: flutter pub get
+
+    - name: Analyze Dart sources
+      run: flutter analyze
+
+    - name: Run Flutter tests
+      run: flutter test
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+
+    - name: Check reader JavaScript syntax
+      run: node --check assets/reader/reader.js
+
+    - name: Run reader JavaScript tests
+      run: node --test test/js/reader_test.mjs
+
+  # ============================================================================
   # JOB 2: Build Flutter applications for Linux and Android only
   # ============================================================================
   build:
     name: Build ${{ github.event.repository.name }}-${{ matrix.artifact_suffix }}
-    needs: check-trigger
+    needs: [check-trigger, quality]
     # Only run this job if [BUILD] trigger was detected
     if: needs.check-trigger.outputs.should_build == 'true'
     runs-on: ${{ matrix.os }}
@@ -287,12 +327,14 @@ jobs:
     # Step 4: Set up Flutter SDK
     # -------------------------------------------------------------------------
     # Downloads and configures the Flutter development environment
-    # Uses latest stable version to ensure compatibility with project requirements
+    # Uses a pinned Flutter version so a new stable release cannot break the
+    # build without a deliberate version bump. Keep it in sync with pubspec.yaml.
     # Caching enabled to speed up subsequent workflow runs
     - name: Set up Flutter SDK
       uses: subosito/flutter-action@v2
       with:
-        channel: 'stable'  # Always use latest stable Flutter version
+        flutter-version: '3.47.7'
+        channel: 'stable'
         cache: true  # Cache Flutter SDK between runs
 
     # -------------------------------------------------------------------------
@@ -306,12 +348,13 @@ jobs:
     # Step 6: Build application for target platform
     # -------------------------------------------------------------------------
     # Each platform has its own build command and configuration
-    # Android build REQUIRES release signing - will fail if secrets not configured
+    # Android uses release signing when the secrets exist, otherwise the debug
+    # key so build-only runs (and forks without secrets) still produce an APK.
     - name: Build ${{ matrix.target }} application
       shell: bash  # Use bash on all platforms for consistent scripting
       env:
-        # Make Android signing secrets available as environment variables
-        # These are REQUIRED for Android builds
+        # Make Android signing secrets available as environment variables.
+        # All four are required for a production-signed APK.
         KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
@@ -335,25 +378,26 @@ jobs:
 
             # Check if release signing secrets are configured in GitHub
             if [ -n "$MISSING_SECRETS" ]; then
-              # CRITICAL: No signing secrets found - FAIL THE BUILD
-              echo "❌ ERROR: Release signing is not fully configured in GitHub Secrets"
-              echo ""
-              echo "Missing secret(s):$MISSING_SECRETS"
-              echo ""
-              echo "Android builds REQUIRE release signing for production."
+              # No secrets: fall back to the debug key so forks and build-only
+              # runs still produce an installable APK. Never publish these.
+              echo "⚠️  Release signing is not configured; using the debug key."
+              echo "   Missing secret(s):$MISSING_SECRETS"
+              echo "   The resulting APK is for testing only."
               echo ""
               echo "To enable release signing, add these secrets to your repository:"
               echo "  Settings → Secrets and variables → Actions → New repository secret"
-              echo ""
-              echo "Required secrets:"
               echo "  - KEYSTORE_BASE64 (base64-encoded keystore file)"
               echo "  - KEYSTORE_PASSWORD (keystore password)"
               echo "  - KEY_PASSWORD (key password)"
               echo "  - KEY_ALIAS (key alias, e.g., ${{ github.event.repository.name }}-release)"
               echo ""
-              echo "See workflow documentation for setup instructions."
-              echo ""
-              exit 1  # Fail the build if secrets are not configured
+              if [[ -n "$RELEASE_VERSION" ]] && [[ "$RELEASE_VERSION" != "none" ]]; then
+                flutter build apk --release \
+                  --build-name="${RELEASE_VERSION#v}" \
+                  --build-number="$GITHUB_RUN_NUMBER"
+              else
+                flutter build apk --release
+              fi
             else
               # Release signing secrets are available
               echo "✅ Release keystore found in GitHub Secrets"
@@ -406,35 +450,30 @@ jobs:
                 flutter build apk --release
               fi
               
-              # Verify the APK signature to ensure it was signed correctly
-              echo ""
-              echo "🔍 Verifying APK signature..."
-
-              APK=build/app/outputs/flutter-apk/app-release.apk
-
-              # apksigner's exit status is authoritative. Grepping its --verbose
-              # text is unreliable because it also prints lines such as
-              # "Verified using v1 scheme (JAR signing): false".
-              if apksigner verify --verbose "$APK"; then
-                echo "✅ APK signature verified successfully"
-                
-                # Show which certificate signed the APK
-                echo ""
-                echo "📋 Signature Details:"
-                apksigner verify --print-certs "$APK"
-              else
-                echo "❌ ERROR: APK signature verification failed!"
-                echo ""
-                echo "Debugging information:"
-                echo "Keystore file location:"
-                ls -lh android/app/*.jks || echo "No keystore files found in android/app/"
-                echo ""
-                exit 1
-              fi
-              
               # The EXIT trap removes the keystore and key.properties.
               echo ""
-              echo "✅ Signed APK created and verified successfully!"
+              echo "✅ Release-signed APK created."
+            fi
+
+            # Verify whichever key signed the APK (release or debug fallback).
+            # apksigner's exit status is authoritative. Grepping its --verbose
+            # text is unreliable because it also prints lines such as
+            # "Verified using v1 scheme (JAR signing): false".
+            echo ""
+            echo "🔍 Verifying APK signature..."
+            APK=build/app/outputs/flutter-apk/app-release.apk
+            if apksigner verify --verbose "$APK"; then
+              echo "✅ APK signature verified successfully"
+              echo ""
+              echo "📋 Signature Details:"
+              apksigner verify --print-certs "$APK"
+            else
+              echo "❌ ERROR: APK signature verification failed!"
+              echo ""
+              echo "Debugging information:"
+              ls -lh android/app/*.jks || echo "No keystore files found in android/app/"
+              echo ""
+              exit 1
             fi
             ;;
           
@@ -700,7 +739,7 @@ jobs:
           **Build Information**:
           - Build Commit: `${{ github.sha }}`
           - Build Date: ${{ steps.metadata.outputs.build_date }}
-          - Platforms: Android (ARM), Linux (x64)
+          - Platforms: Android (universal APK), Linux (x64)
       
       env:
         # GitHub automatically provides this token for releases

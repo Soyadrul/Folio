@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:folio/epub/epub.dart';
+import 'package:folio/epub/epub_metadata.dart';
 import 'package:path/path.dart' as p;
 
 import '../support/epub_fixture.dart';
@@ -81,7 +82,6 @@ void main() {
         expect(book.documentAt(2)?.relPath, 'OEBPS/text/notes.xhtml');
         expect(book.documentAt(3)?.relPath, 'OEBPS/text/endnotes.xhtml');
         expect(book.documentAt(4), isNull);
-        expect(book.chapterIndexForPath('OEBPS/text/notes.xhtml'), 2);
 
         expect(book.nextReadingIndex(0), 1);
         expect(book.nextReadingIndex(1), isNull);
@@ -172,6 +172,32 @@ void main() {
       expect(book.coverImagePath, endsWith('OEBPS/images/pic.jpg'));
     });
 
+    test('skips a non-image cover metadata entry', () async {
+      final opf = epub2Opf.replaceFirst(
+        '<item id="cover-img" href="images/Cover.JPG" media-type="image/jpeg"/>',
+        '<item id="cover-img" href="text/cover.xhtml" '
+            'media-type="application/xhtml+xml"/>',
+      );
+      final entries = epub2Entries(opf: opf)
+        ..['OEBPS/text/cover.xhtml'] =
+            '<html><body><img src="../images/pic.jpg"/></body></html>';
+      final file = await EpubFixture.write(tmp, entries);
+      final book = await loader().load(file.path);
+      expect(book.coverImagePath, endsWith('OEBPS/images/pic.jpg'));
+    });
+
+    test('joins all creators the same way as the library metadata', () async {
+      final opf = epub2Opf.replaceFirst(
+        '<dc:creator>Jane Doe</dc:creator>',
+        '<dc:creator>Jane Doe</dc:creator><dc:creator>John Roe</dc:creator>',
+      );
+      final file = await EpubFixture.write(tmp, epub2Entries(opf: opf));
+      final book = await loader().load(file.path);
+      final metadata = await readEpubMetadata(file.path);
+      expect(book.author, 'Jane Doe, John Roe');
+      expect(book.author, metadata.author);
+    });
+
     test('falls back to the first image in the first spine chapter', () async {
       final opf = epub2Opf
           .replaceFirst('    <meta name="cover" content="cover-img"/>\n', '')
@@ -199,6 +225,16 @@ void main() {
       expect(book.toc.map((t) => t.title), ['First', 'Second']);
       expect(book.toc[1].chapterIndex, 1);
       expect(book.toc[1].fragment, 'sec');
+    });
+
+    test('ignores a non-image cover-image property', () async {
+      final opf = epub3Opf.replaceFirst(
+        'href="images/cover.png" media-type="image/png"',
+        'href="text/ch1.xhtml" media-type="application/xhtml+xml"',
+      );
+      final file = await EpubFixture.write(tmp, epub3Entries(opf: opf));
+      final book = await loader().load(file.path);
+      expect(book.coverImagePath, endsWith('OEBPS/images/pic.jpg'));
     });
 
     test(

@@ -7,9 +7,7 @@ import 'package:folio/main.dart';
 void main() {
   testWidgets('App loads without crashing', (WidgetTester tester) async {
     // Build our app and trigger a frame.
-    await tester.pumpWidget(
-      const ProviderScope(child: FolioApp()),
-    );
+    await tester.pumpWidget(const ProviderScope(child: FolioApp()));
 
     // Verify that the app displays the title.
     expect(find.text('Folio'), findsOneWidget);

@@ -18,6 +18,9 @@ const _kLibraryFolderKey = 'folio_library_folder';
 typedef LibraryScanner =
     Future<LibraryScan> Function(String path, {String? cachePath});
 
+/// Checks Android storage permission. Injectable so tests can simulate denial.
+typedef StoragePermissionCheck = Future<bool> Function();
+
 // ── State ─────────────────────────────────────────────────────────────────
 
 class LibraryState {
@@ -78,10 +81,14 @@ final libraryProvider = NotifierProvider<LibraryNotifier, LibraryState>(() {
 });
 
 class LibraryNotifier extends Notifier<LibraryState> {
-  LibraryNotifier({LibraryScanner? scanner})
-    : _scanner = scanner ?? scanFolderForBooks;
+  LibraryNotifier({
+    LibraryScanner? scanner,
+    StoragePermissionCheck? hasStoragePermission,
+  }) : _scanner = scanner ?? scanFolderForBooks,
+       _hasStoragePermissionOverride = hasStoragePermission;
 
   final LibraryScanner _scanner;
+  final StoragePermissionCheck? _hasStoragePermissionOverride;
 
   /// Every scan gets a token; only the newest one may publish its result.
   int _scanToken = 0;
@@ -111,6 +118,8 @@ class LibraryNotifier extends Notifier<LibraryState> {
   }
 
   Future<bool> _hasStoragePermission() async {
+    final override = _hasStoragePermissionOverride;
+    if (override != null) return override();
     if (!Platform.isAndroid) return true;
     if (await Permission.manageExternalStorage.isGranted) return true;
     return Permission.storage.isGranted;
@@ -142,7 +151,7 @@ class LibraryNotifier extends Notifier<LibraryState> {
       needsPermission: false,
     );
 
-    if (Platform.isAndroid && !await _hasStoragePermission()) {
+    if (!await _hasStoragePermission()) {
       if (token != _scanToken) return;
       state = state.copyWith(
         isLoading: false,

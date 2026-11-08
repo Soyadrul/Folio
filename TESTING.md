@@ -1,40 +1,44 @@
-# Testing note
+# Testing
 
-## Automated checks (this repository)
+## Automated checks
 
 Run from the repository root:
 
-| Check | Command | Result |
-| --- | --- | --- |
-| Static analysis | `flutter analyze` | No issues |
-| Unit and widget tests | `flutter test` | 86 tests passing |
-| Reader JavaScript syntax | `node --check assets/reader/reader.js` | OK |
-| Linux desktop build | `flutter build linux --release` | Built `build/linux/x64/release/bundle/folio` |
+| Check | Command |
+| --- | --- |
+| Static analysis | `flutter analyze` |
+| Unit and widget tests | `flutter test` |
+| Reader JavaScript syntax | `node --check assets/reader/reader.js` |
+| Reader JavaScript tests | `node --test test/js/reader_test.mjs` |
+| Linux desktop build | `flutter build linux --release` |
 
-The tests cover the EPUB parser and URL rewriting, the scanner and cover
-thumbnails, settings defaults/ranges/JSON, volume-key mapping, reading-position
-storage, the Settings page groups, and closing the reader (it must save the
-position without using `ref` during dispose). The EPUB tests also cover
-including the EPUB 3 navigation document when it is marked `linear="no"`,
-nested TOC levels, chapter language propagation for hyphenation, and
-fragment-safe `file:` link parsing.
+The Dart/Flutter suite covers the EPUB parser (spine order, nested NCX/nav
+tables of contents, metadata/cover fallbacks, cache reuse and concurrency),
+URL rewriting and sanitising, the library scanner and metadata cache, settings
+defaults/ranges/JSON compatibility, the settings notifier (preload, debounce,
+late-load race), volume-key mapping, reading-position storage, and the
+Settings screen. The JavaScript suite exercises the reader's progress maths,
+page snapping, chapter-request debounce, trailing progress reports and
+hyphenation CSS.
+
+The workflow in `.github/workflows/build-release.yml` runs `flutter analyze`,
+`flutter test`, `node --check` and `node --test` before building, so these
+checks are also enforced in CI.
 
 ## Android acceptance criteria
 
-No Android SDK, emulator or physical device was available while this work was
-done. The criteria in section 11 of `Development_Specification.md` therefore
-still need to be checked on a real device before the work is considered
-finished.
+An Android SDK, emulator and physical device are not available in every
+development environment. Check the following on a real device before a
+release:
 
 Suggested manual pass, using at least five EPUB files (EPUB 2 and EPUB 3, a
 book with many images, a book whose first item is a cover page, and a book of
 more than 500 pages):
 
-1. Open each book: chapter text is complete and formatted (P1).
-2. Images appear and fit inside the page, including SVG (P2).
+1. Open each book: chapter text is complete and formatted.
+2. Images appear and fit inside the page, including SVG.
 3. The library shows covers; books without a cover show a placeholder.
-   Scroll a folder with at least 100 books and check that scrolling is smooth
-   (P3).
+   Scroll a folder with at least 100 books and check that scrolling is smooth.
 4. Book mode: turn pages with volume buttons, taps in both zones, and swipes.
    Switch each method off and confirm it stops responding. Cross chapter
    boundaries in both directions.
@@ -56,22 +60,26 @@ more than 500 pages):
 10. Check the heading hierarchy and running text: chapter numbers stand out,
     paragraphs are indented without blank lines between them, and justified
     Italian text hyphenates instead of leaving wide word gaps.
+11. Open an `.epub` shared from another app (mail, file manager) and confirm it
+    opens in Folio.
+12. Background the app while a book is open, then return: the reader must
+    recover if Android killed the WebView process.
 
 ## Known limitations
 
-- Book mode is implemented in the Android WebView reader. The Linux build keeps
-  the scroll-only Flutter fallback, so choosing Book mode on Linux does not
-  paginate.
-- Keep-screen-on is implemented through an Android window flag. On Linux it is
-  a no-op and the desktop power settings remain in control.
+- Book mode (pagination) is implemented in the Android WebView reader. The
+  Linux build keeps the scroll-only Flutter fallback, so choosing Book mode on
+  Linux does not paginate.
+- Keep-screen-on and volume-key interception are implemented through Android
+  bridges. On Linux they are no-ops and the desktop power settings remain in
+  control.
 - Element-level position restore is best effort: it only works when the chapter
   provides element ids. Otherwise the reader restores the 0–1 progress value.
 - CSS hyphenation inside the WebView uses the chapter's own language. If the
   WebView has no dictionary for that language, the text is simply not
-  hyphenated. The Flutter/Linux fallback uses the bundled hyphenator.
+  hyphenated. The Linux native reader does not hyphenate.
 - Including a previously skipped EPUB 3 navigation document adds one chapter
   to such books, so a position saved by an older Folio build can resume one
   chapter early once.
-- The volume-key interception and the Android keep-screen-on flag could not be
-  compiled or run here; they need an on-device check with the rest of the
-  Android checklist.
+- WebView rendering, volume-key interception and the keep-screen-on flag need
+  the on-device checklist above; unit tests cannot exercise them.

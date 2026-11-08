@@ -8,7 +8,6 @@ import 'package:permission_handler/permission_handler.dart';
 
 import '../models/book.dart';
 import '../providers/library_provider.dart';
-import '../providers/settings_provider.dart';
 import '../utils/theme_utils.dart';
 import '../widgets/book_card.dart';
 import 'reader_screen.dart';
@@ -24,25 +23,6 @@ class HomeScreen extends ConsumerStatefulWidget {
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   final _searchController = TextEditingController();
   String _searchQuery = '';
-
-  @override
-  void initState() {
-    super.initState();
-    // Load persisted settings from disk on first build.
-    _loadSettings();
-  }
-
-  Future<void> _loadSettings() async {
-    try {
-      final saved = await loadSettings();
-      if (mounted) {
-        ref.read(settingsNotifierProvider.notifier).update((_) => saved);
-      }
-    } catch (e) {
-      // Ignore errors loading settings - app will use defaults
-      debugPrint('Error loading settings: $e');
-    }
-  }
 
   @override
   void dispose() {

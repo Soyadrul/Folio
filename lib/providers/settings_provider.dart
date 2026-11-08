@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -29,14 +31,6 @@ Future<void> saveSettings(AppSettings settings) async {
 
 // ── Riverpod provider ──────────────────────────────────────────────────────
 
-/// Asynchronously provides the initial [AppSettings] by reading from disk.
-///
-/// The [settingsNotifierProvider] is what the UI watches; it is initialised
-/// from this future provider.
-final settingsFutureProvider = FutureProvider<AppSettings>((ref) async {
-  return loadSettings();
-});
-
 /// Holds and exposes the mutable [AppSettings] for the whole app.
 ///
 /// Usage:
@@ -48,34 +42,72 @@ final settingsFutureProvider = FutureProvider<AppSettings>((ref) async {
 ///   ```
 final settingsNotifierProvider =
     NotifierProvider<SettingsNotifier, AppSettings>(() {
-  return SettingsNotifier();
-});
+      return SettingsNotifier();
+    });
 
 class SettingsNotifier extends Notifier<AppSettings> {
+  SettingsNotifier({AppSettings? initial}) : _initial = initial;
+
+  final AppSettings? _initial;
+  bool _edited = false;
+  Timer? _saveTimer;
+
   @override
   AppSettings build() {
-    // Load settings asynchronously after the first frame
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _loadSettings();
-    });
-    return const AppSettings();
+    ref.onDispose(() => _saveTimer?.cancel());
+    if (_initial == null) {
+      // Used by tests and embedders that did not preload the settings. The
+      // production entry point passes the loaded value to `initial` instead,
+      // so the first frame never shows defaults.
+      unawaited(_loadSettings());
+    }
+    return _initial ?? const AppSettings();
   }
 
-  /// Loads settings from SharedPreferences and updates state.
+  /// Loads settings from disk, unless the user changed something first.
   Future<void> _loadSettings() async {
     final settings = await loadSettings();
+    // A slider moved while the disk read was in flight must not be reset to
+    // the old saved value when the future completes.
+    if (_edited) return;
     state = settings;
   }
 
-  /// Replaces the entire state and persists it.
+  /// Replaces the entire state and schedules a debounced save.
   Future<void> update(AppSettings Function(AppSettings) updater) async {
-    state = updater(state);
-    await saveSettings(state);
+    final next = updater(state);
+    if (next == state) return;
+    _edited = true;
+    state = next;
+    _scheduleSave();
   }
 
-  /// Resets everything to factory defaults and persists.
+  /// Resets everything to factory defaults and schedules a save.
   Future<void> reset() async {
+    _edited = true;
     state = const AppSettings();
-    await saveSettings(state);
+    _scheduleSave();
+  }
+
+  void _scheduleSave() {
+    _saveTimer?.cancel();
+    _saveTimer = Timer(const Duration(milliseconds: 250), _saveNow);
+  }
+
+  Future<void> _saveNow() async {
+    _saveTimer = null;
+    try {
+      await saveSettings(state);
+    } catch (error) {
+      // A failed write must not become an unhandled async error. The in-memory
+      // value stays valid for this session.
+      debugPrint('Folio: could not save settings: $error');
+    }
+  }
+
+  /// Writes any pending change immediately (tests and app shutdown).
+  Future<void> flush() async {
+    _saveTimer?.cancel();
+    await _saveNow();
   }
 }

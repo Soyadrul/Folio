@@ -41,7 +41,6 @@ void main() {
       lineHeight: 1.8,
       textAlign: TextAlign.left,
       hyphenation: false,
-      hyphenationLanguage: 'it',
       marginHorizontal: 24,
       readingMode: ReadingMode.sepia,
       keepScreenOn: false,
@@ -106,6 +105,34 @@ void main() {
     expect(settings.textAlign, TextAlign.justify);
   });
 
+  test('enums are stored by name and old indexes still decode', () {
+    const settings = AppSettings(
+      textAlign: TextAlign.center,
+      readingMode: ReadingMode.dark,
+      readerMode: ReaderMode.scroll,
+    );
+    final json = settings.toJson();
+    expect(json['textAlign'], 'center');
+    expect(json['readingMode'], 'dark');
+    expect(json['readerMode'], 'scroll');
+
+    expect(
+      AppSettings.fromJson(const {
+        'textAlign': 'center',
+        'readingMode': 'dark',
+        'readerMode': 'scroll',
+      }),
+      settings,
+    );
+    expect(
+      AppSettings.fromJson({
+        'textAlign': TextAlign.center.index,
+        'readerMode': ReaderMode.scroll.index,
+      }).textAlign,
+      TextAlign.center,
+    );
+  });
+
   test('settings that differ in any field are not equal', () {
     const settings = AppSettings();
     expect(settings, const AppSettings());
@@ -116,7 +143,6 @@ void main() {
       settings.copyWith(lineHeight: 1.6),
       settings.copyWith(textAlign: TextAlign.left),
       settings.copyWith(hyphenation: false),
-      settings.copyWith(hyphenationLanguage: 'it'),
       settings.copyWith(marginHorizontal: 20),
       settings.copyWith(readingMode: ReadingMode.dark),
       settings.copyWith(keepScreenOn: false),

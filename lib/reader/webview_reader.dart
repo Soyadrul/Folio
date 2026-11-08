@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -106,6 +107,15 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
   bool _autoScrollRunning = false;
   int _autoScrollSpeed = 40;
 
+  /// Incremented after the WebView renderer dies so a fresh platform view is
+  /// created instead of leaving the reader on a blank page.
+  int _webViewGeneration = 0;
+
+  /// Keeps each `evaluateJavascript` call small. A single-file book can have
+  /// chapters several megabytes long, and handing all of that to the
+  /// JavaScript bridge at once can exhaust it.
+  static const _maxScriptChunk = 128 * 1024;
+
   final Map<int, ChapterContent> _chapterCache = {};
   static const _cacheLimit = 4;
 
@@ -146,7 +156,7 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
     final marginChanged =
         oldWidget.settings.marginHorizontal != widget.settings.marginHorizontal;
 
-    unawaited(
+    _background(
       _applySettingsAndRestore(
         modeChanged: modeChanged,
         reflow: typographyChanged || marginChanged,
@@ -378,13 +388,11 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
         progress: progress,
         element: element,
       );
-      await _controller!.evaluateJavascript(
-        source: 'folio.setChapter(${jsonEncode(payload)});',
-      );
+      await _sendChapter(payload: payload, html: content.bodyHtml);
 
       // Warm the next chapter without blocking the current one.
       final next = widget.document.nextReadingIndex(index);
-      if (next != null) unawaited(_contentFor(next));
+      if (next != null) _background(_contentFor(next));
     } finally {
       _loadingChapter = false;
       final pending = _pendingChapter;
@@ -394,7 +402,7 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
         final pendingElement = _pendingElement;
         _pendingProgress = 0;
         _pendingElement = null;
-        unawaited(
+        _background(
           _loadChapter(
             pending,
             progress: pendingProgress,
@@ -405,18 +413,34 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
     }
   }
 
-  Future<void> _appendOrPrepend(int direction) async {
-    final target = direction > 0
-        ? widget.document.nextReadingIndex(_currentChapter)
-        : widget.document.previousReadingIndex(_currentChapter);
-    if (target == null) return;
+  /// Sends a chapter in small pieces so the JavaScript bridge never has to
+  /// carry a multi-megabyte script string.
+  Future<void> _sendChapter({
+    required Map<String, dynamic> payload,
+    required String html,
+  }) async {
+    final controller = _controller;
+    if (controller == null || !_shellReady) return;
+    payload.remove('html');
+    await controller.evaluateJavascript(
+      source: 'folio.startChapter(${jsonEncode(payload)});',
+    );
+    for (var start = 0; start < html.length; start += _maxScriptChunk) {
+      final end = (start + _maxScriptChunk).clamp(0, html.length);
+      await controller.evaluateJavascript(
+        source:
+            'folio.appendChapterHtml(${jsonEncode(html.substring(start, end))});',
+      );
+    }
+    await controller.evaluateJavascript(source: 'folio.endChapter();');
+  }
+
+  Future<void> _appendOrPrepend(int target, {required bool after}) async {
     final content = await _contentFor(target);
     if (content == null || _controller == null) return;
-    final payload = _payload(target, content);
-    final source = direction > 0
-        ? 'folio.appendChapter(${jsonEncode(payload)});'
-        : 'folio.prependChapter(${jsonEncode(payload)});';
-    await _controller!.evaluateJavascript(source: source);
+    final payload = _payload(target, content)
+      ..['target'] = after ? 'append' : 'prepend';
+    await _sendChapter(payload: payload, html: content.bodyHtml);
   }
 
   Future<void> _handleLink(String href) async {
@@ -483,9 +507,20 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
         }
         break;
       case 'needChapter':
-        await _appendOrPrepend(
-          (message['direction'] as num?)?.toInt() == -1 ? -1 : 1,
-        );
+        // Use the chapter the scroll event actually came from. `_currentChapter`
+        // can still point at the previous chapter while a load is in flight,
+        // which appended the wrong neighbour.
+        final direction = (message['direction'] as num?)?.toInt() == -1
+            ? -1
+            : 1;
+        final from =
+            (message['chapterIndex'] as num?)?.toInt() ?? _currentChapter;
+        final target = direction > 0
+            ? widget.document.nextReadingIndex(from)
+            : widget.document.previousReadingIndex(from);
+        if (target != null) {
+          await _appendOrPrepend(target, after: direction > 0);
+        }
         break;
       case 'link':
         final href = message['href'] as String?;
@@ -602,6 +637,7 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
       return const Center(child: CircularProgressIndicator());
     }
     return InAppWebView(
+      key: ValueKey(_webViewGeneration),
       initialData: InAppWebViewInitialData(
         data: shell,
         mimeType: 'text/html',
@@ -621,6 +657,28 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
         );
       },
       onLoadStop: (controller, _) => _onLoadStop(controller),
+      onRenderProcessGone: (controller, detail) {
+        if (!mounted) return;
+        // The platform WebView cannot be reused after its renderer dies. Drop
+        // the controller and rebuild with a new key; `_onLoadStop` then reloads
+        // the chapter at the saved position.
+        _shellReady = false;
+        _shellLoaded = false;
+        _controller = null;
+        _loadingChapter = false;
+        _pendingChapter = null;
+        _pendingProgress = 0;
+        _pendingElement = null;
+        _requestedChapter = _currentChapter;
+        widget.callbacks.onError?.call(
+          detail.didCrash
+              ? 'The reader engine crashed. Reloading the chapter…'
+              : 'The reader engine was closed. Reloading the chapter…',
+        );
+        setState(() {
+          _webViewGeneration++;
+        });
+      },
       shouldOverrideUrlLoading: (controller, action) async {
         final allowed = readerAllowsNavigation(
           shellLoaded: _shellLoaded,
@@ -641,9 +699,12 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
   }
 }
 
-/// Local `unawaited` so the reader does not depend on `dart:async` extensions.
-void unawaited(Future<void> future) {
-  future.catchError((Object error) {
-    debugPrint('Folio: background task failed: $error');
-  });
+/// Runs a background task and logs failures instead of letting them become
+/// unhandled async errors.
+void _background(Future<void> future) {
+  unawaited(
+    future.catchError((Object error, StackTrace stack) {
+      debugPrint('Folio: background task failed: $error');
+    }),
+  );
 }

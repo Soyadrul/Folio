@@ -23,6 +23,7 @@ import 'package:path/path.dart' as p;
 
 import 'epub/epub_metadata.dart';
 import 'models/book.dart';
+import 'providers/settings_provider.dart';
 import 'screens/home_screen.dart';
 import 'screens/reader_screen.dart';
 import 'utils/open_file_service.dart';
@@ -31,7 +32,7 @@ import 'utils/theme_utils.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Lock to portrait on Android (optional – remove to allow landscape).
+  // Allow portrait and landscape. The reader reflows when the device rotates.
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
@@ -39,9 +40,19 @@ void main() async {
     DeviceOrientation.landscapeRight,
   ]);
 
+  // Load the saved settings before the first frame. Building the notifier with
+  // the value also closes the race where a late disk read overwrote an edit.
+  final settings = await loadSettings();
+
   runApp(
-    // ProviderScope is the Riverpod root – all providers live here.
-    const ProviderScope(child: FolioApp()),
+    ProviderScope(
+      overrides: [
+        settingsNotifierProvider.overrideWith(
+          () => SettingsNotifier(initial: settings),
+        ),
+      ],
+      child: const FolioApp(),
+    ),
   );
 }
 

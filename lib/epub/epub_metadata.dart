@@ -16,6 +16,27 @@ class EpubMetadata {
   final String author;
 }
 
+/// Reads title and author from an already parsed `<package>` document.
+///
+/// The library grid and the reader both use this so they show the same title
+/// and the same (comma-joined) author list. [fallbackTitle] is used when the
+/// package has no usable title.
+EpubMetadata readPackageMetadata(
+  XmlElement package, {
+  required String fallbackTitle,
+}) {
+  final metadata = _firstElement(package, 'metadata');
+  final title = _textOf(_firstElement(metadata, 'title')).trim();
+  final authors = _allElements(metadata, 'creator')
+      .map((element) => element.innerText.trim())
+      .where((author) => author.isNotEmpty)
+      .toList();
+  return EpubMetadata(
+    title: title.isEmpty ? fallbackTitle : title,
+    author: authors.isEmpty ? 'Unknown Author' : authors.join(', '),
+  );
+}
+
 Future<EpubMetadata> readEpubMetadata(String filePath) async {
   // Read the ZIP directory and the two documents it points at instead of
   // loading the whole book into memory. A large EPUB can be hundreds of MB.
@@ -89,21 +110,33 @@ EpubMetadata _readMetadata(Archive archive, String filePath) {
   final opf = XmlDocument.parse(
     utf8.decode(opfEntry.readBytes() ?? const [], allowMalformed: true),
   );
-  final titleElement = opf.descendants
-      .whereType<XmlElement>()
-      .where((e) => e.name.local == 'title')
-      .firstOrNull;
-  final creator = opf.descendants
-      .whereType<XmlElement>()
-      .where((e) => e.name.local == 'creator')
-      .firstOrNull;
-  final title = titleElement?.innerText.trim() ?? '';
-  final author = creator?.innerText.trim() ?? '';
-  return EpubMetadata(
-    title: title.isEmpty ? p.basenameWithoutExtension(filePath) : title,
-    author: author.isEmpty ? 'Unknown Author' : author,
+  final package = _firstElement(opf, 'package');
+  if (package == null) {
+    throw const FormatException('The package document has no <package>');
+  }
+  return readPackageMetadata(
+    package,
+    fallbackTitle: p.basenameWithoutExtension(filePath),
   );
 }
+
+XmlElement? _firstElement(XmlNode? root, String localName) {
+  if (root == null) return null;
+  for (final element in root.descendants.whereType<XmlElement>()) {
+    if (element.name.local == localName) return element;
+  }
+  return null;
+}
+
+List<XmlElement> _allElements(XmlNode? root, String localName) {
+  if (root == null) return const [];
+  return root.descendants
+      .whereType<XmlElement>()
+      .where((element) => element.name.local == localName)
+      .toList();
+}
+
+String _textOf(XmlElement? element) => element?.innerText ?? '';
 
 String _decode(String value) {
   try {

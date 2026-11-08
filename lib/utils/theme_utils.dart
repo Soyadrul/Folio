@@ -89,14 +89,15 @@ ThemeData buildLightTheme() {
   return ThemeData(
     useMaterial3: true,
     brightness: Brightness.light,
-    colorScheme: ColorScheme.fromSeed(
-      seedColor: kAccentColor,
-      brightness: Brightness.light,
-    ).copyWith(
-      primary: kAccentColor,
-      secondary: kAccentColorLight,
-      surface: const Color(0xFFFAF8F4),
-    ),
+    colorScheme:
+        ColorScheme.fromSeed(
+          seedColor: kAccentColor,
+          brightness: Brightness.light,
+        ).copyWith(
+          primary: kAccentColor,
+          secondary: kAccentColorLight,
+          surface: const Color(0xFFFAF8F4),
+        ),
     scaffoldBackgroundColor: const Color(0xFFF2EFE8),
     appBarTheme: AppBarTheme(
       backgroundColor: const Color(0xFF1A1A2E),
@@ -136,14 +137,15 @@ ThemeData buildDarkTheme() {
   return ThemeData(
     useMaterial3: true,
     brightness: Brightness.dark,
-    colorScheme: ColorScheme.fromSeed(
-      seedColor: kAccentColor,
-      brightness: Brightness.dark,
-    ).copyWith(
-      primary: kAccentColorLight,
-      secondary: kAccentColor,
-      surface: const Color(0xFF13131A),
-    ),
+    colorScheme:
+        ColorScheme.fromSeed(
+          seedColor: kAccentColor,
+          brightness: Brightness.dark,
+        ).copyWith(
+          primary: kAccentColorLight,
+          secondary: kAccentColor,
+          surface: const Color(0xFF13131A),
+        ),
     scaffoldBackgroundColor: const Color(0xFF0F0F16),
     appBarTheme: AppBarTheme(
       backgroundColor: const Color(0xFF13131A),

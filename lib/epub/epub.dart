@@ -11,6 +11,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:xml/xml.dart';
 
 import 'chapter_html.dart';
+import 'epub_metadata.dart';
 import 'href_resolver.dart';
 
 /// A user-facing problem while opening an EPUB.
@@ -128,16 +129,6 @@ class EpubDocument {
     }
     return null;
   }
-
-  EpubChapter? chapterByRelPath(String relPath) {
-    for (final chapter in allDocuments) {
-      if (chapter.relPath == relPath) return chapter;
-    }
-    return null;
-  }
-
-  /// Index of the document containing [relPath], if it is openable.
-  int? chapterIndexForPath(String relPath) => chapterByRelPath(relPath)?.index;
 
   /// Index of the next document in the reading flow, or null at the end.
   int? nextReadingIndex(int index) {
@@ -263,10 +254,12 @@ class EpubLoader {
       await _extractAtomically(file, dir, absolute, stat);
     }
 
+    final container = await _findAndParseContainer(dir);
     return _parse(
       filePath: absolute,
       cacheDir: dir.path,
-      opfPath: await _findAndParseContainer(dir),
+      opfPath: container.opfPath,
+      files: container.files,
     );
   }
 
@@ -377,7 +370,9 @@ class EpubLoader {
     return files;
   }
 
-  Future<String> _findAndParseContainer(Directory dir) async {
+  Future<({String opfPath, List<String> files})> _findAndParseContainer(
+    Directory dir,
+  ) async {
     final files = await _listFiles(dir);
     final resolver = HrefResolver(files);
     final found = resolver.resolve(
@@ -415,15 +410,18 @@ class EpubLoader {
     if (opf.path == null) {
       throw EpubException('The EPUB package document is missing ($fullPath).');
     }
-    return p.joinAll([dir.path, ...opf.path!.split('/')]);
+    return (
+      opfPath: p.joinAll([dir.path, ...opf.path!.split('/')]),
+      files: files,
+    );
   }
 
   Future<EpubDocument> _parse({
     required String filePath,
     required String cacheDir,
     required String opfPath,
+    required List<String> files,
   }) async {
-    final files = await _listFiles(Directory(cacheDir));
     final resolver = HrefResolver(files);
     final opfRel = p.relative(opfPath, from: cacheDir).replaceAll('\\', '/');
 
@@ -445,12 +443,12 @@ class EpubLoader {
       throw EpubException('The EPUB package is missing its manifest or spine.');
     }
 
-    final title = _textOf(_firstElement(metadata, 'title')).trim();
-    final authors = _allElements(
-      metadata,
-      'creator',
-    ).map((e) => e.innerText.trim()).where((s) => s.isNotEmpty).toList();
-    final author = authors.isEmpty ? 'Unknown Author' : authors.join(', ');
+    final bookMetadata = readPackageMetadata(
+      package,
+      fallbackTitle: p.basenameWithoutExtension(filePath),
+    );
+    final title = bookMetadata.title;
+    final author = bookMetadata.author;
 
     final manifestItems = <String, _ManifestItem>{};
     for (final item in _allElements(manifest, 'item')) {
@@ -580,11 +578,14 @@ class EpubLoader {
       resolver: resolver,
     );
 
+    final tocTitles = <int, String>{};
+    for (final entry in toc) {
+      if (entry.title.trim().isEmpty) continue;
+      tocTitles.putIfAbsent(entry.chapterIndex, () => entry.title);
+    }
+
     Future<EpubChapter> withTitle(EpubChapter chapter) async {
-      final tocTitle = toc
-          .where((t) => t.chapterIndex == chapter.index)
-          .map((t) => t.title)
-          .firstWhere((t) => t.trim().isNotEmpty, orElse: () => '');
+      final tocTitle = tocTitles[chapter.index] ?? '';
       final titleFromChapter = tocTitle.isEmpty
           ? await _chapterTitle(chapter.path)
           : tocTitle;
@@ -627,7 +628,7 @@ class EpubLoader {
       filePath: filePath,
       cacheDir: cacheDir,
       opfPath: opfPath,
-      title: title.isEmpty ? p.basenameWithoutExtension(filePath) : title,
+      title: title,
       author: author,
       chapters: titledChapters,
       auxiliaryDocuments: titledAuxiliary,
@@ -650,14 +651,14 @@ class EpubLoader {
     required HrefResolver resolver,
   }) async {
     final entries = <EpubTocEntry>[];
+    final indexByPath = {
+      for (final chapter in chapters) chapter.relPath: chapter.index,
+    };
 
     void add(String title, String href, String base, {int level = 0}) {
       final resolved = resolver.resolve(href, basePath: base);
       if (resolved.path == null) return;
-      final index = chapters
-          .where((c) => c.relPath == resolved.path)
-          .firstOrNull
-          ?.index;
+      final index = indexByPath[resolved.path];
       if (index == null) return;
       entries.add(
         EpubTocEntry(
@@ -831,6 +832,7 @@ class EpubLoader {
     for (final item in manifestItems.values) {
       if (!item.properties.split(' ').contains('cover-image')) continue;
       final resolved = resolver.resolve(item.href, basePath: opfRel);
+      if (resolved.path == null || !_isImagePath(resolved.path!)) continue;
       final path = existing(resolved.path);
       if (path != null) return path;
     }
@@ -842,6 +844,7 @@ class EpubLoader {
       final item = id == null ? null : manifestItems[id];
       if (item == null) continue;
       final resolved = resolver.resolve(item.href, basePath: opfRel);
+      if (resolved.path == null || !_isImagePath(resolved.path!)) continue;
       final path = existing(resolved.path);
       if (path != null) return path;
     }

@@ -48,7 +48,12 @@ class Element {
     this.attributes = {};
     this.children = [];
     this.parentElement = null;
-    this.style = { setProperty() {} };
+    this.style = {
+      properties: {},
+      setProperty(name, value) {
+        this.properties[name] = value;
+      },
+    };
     this.classList = new ClassList(this);
     this.scrollTop = 0;
     this.scrollLeft = 0;
@@ -60,6 +65,7 @@ class Element {
     this.offsetHeight = 0;
     this._html = '';
     this._rect = { top: 0, bottom: 0, left: 0, right: 0 };
+    this._listeners = new Map();
     this.onScrollIntoView = null;
   }
   get id() {
@@ -147,7 +153,13 @@ class Element {
   scrollIntoView() {
     if (this.onScrollIntoView) this.onScrollIntoView(this);
   }
-  addEventListener() {}
+  addEventListener(type, handler) {
+    if (!this._listeners.has(type)) this._listeners.set(type, []);
+    this._listeners.get(type).push(handler);
+  }
+  dispatch(type, event) {
+    for (const handler of this._listeners.get(type) || []) handler(event);
+  }
 }
 
 function matches(element, rawSelector) {
@@ -580,5 +592,189 @@ test('taps on an anchor with href do not turn the page', async () => {
     reader.posts.some((post) => post.type === 'tapZone'),
     false,
     'a real link keeps its own behaviour'
+  );
+});
+
+test('scroll progress and restore use the same chapter range', async () => {
+  const reader = loadReader();
+  reader.scroller.clientWidth = 400;
+  reader.scroller.clientHeight = 600;
+  reader.scroller._rect = { top: 0, bottom: 600, left: 0, right: 400 };
+  reader.folio.init(defaults());
+
+  addSection(reader, { index: 0, top: 0, height: 1200 });
+  reader.folio.relayout();
+  await wait(20);
+
+  // The chapter can scroll exactly 1200 - 600 pixels, so the bottom must be
+  // progress 1.0 rather than 0.5.
+  reader.scroller.scrollTop = 600;
+  reader.posts.length = 0;
+  reader.folio.relayout();
+  await wait(20);
+  assert.equal(lastProgress(reader.posts).progress, 1);
+
+  reader.folio.goToProgress(0.25);
+  assert.equal(reader.scroller.scrollTop, 150);
+
+  reader.folio.goToProgress(1);
+  assert.equal(reader.scroller.scrollTop, 600);
+});
+
+test('a book anchor jump snaps to a whole page', async () => {
+  const reader = loadReader();
+  reader.scroller.clientWidth = 400;
+  reader.scroller.clientHeight = 600;
+  reader.scroller._rect = { top: 0, bottom: 600, left: 0, right: 400 };
+  reader.content.scrollWidth = 1200;
+  reader.content.scrollHeight = 600;
+  reader.folio.init(defaults({ mode: 'book' }));
+  await wait(20);
+
+  const section = addSection(reader, { index: 0 });
+  const target = reader.document.createElement('span');
+  target.id = 'sec';
+  target.onScrollIntoView = () => {
+    // A narrow anchor leaves the scroller between two pages.
+    reader.scroller.scrollLeft = 250;
+  };
+  section.appendChild(target);
+
+  reader.folio.relayout();
+  await wait(20);
+  reader.posts.length = 0;
+  reader.folio.goToProgress(0, 'sec');
+
+  assert.equal(reader.scroller.scrollLeft, 400);
+  const pages = reader.posts.filter((post) => post.type === 'pages').at(-1);
+  assert.equal(pages.pages, 3);
+});
+
+test('needChapter is debounced while the chapter is still loading', async () => {
+  const reader = loadReader();
+  reader.scroller.clientWidth = 400;
+  reader.scroller.clientHeight = 600;
+  reader.scroller._rect = { top: 0, bottom: 600, left: 0, right: 400 };
+  reader.folio.init(defaults());
+  reader.folio.setChapter({
+    index: 0,
+    html: '',
+    head: '',
+    hasPrev: false,
+    hasNext: true,
+  });
+  await wait(300);
+
+  reader.scroller.scrollHeight = 1800;
+  reader.scroller.clientHeight = 600;
+  reader.scroller.scrollTop = 1200;
+  reader.posts.length = 0;
+
+  reader.scroller.dispatch('scroll', {});
+  assert.equal(
+    reader.posts.filter((post) => post.type === 'needChapter').length,
+    1,
+    'the first edge crossing asks for the next chapter'
+  );
+  reader.scroller.dispatch('scroll', {});
+  assert.equal(
+    reader.posts.filter((post) => post.type === 'needChapter').length,
+    1,
+    'a second scroll event does not repeat the request'
+  );
+
+  await wait(300);
+  reader.scroller.dispatch('scroll', {});
+  assert.equal(
+    reader.posts.filter((post) => post.type === 'needChapter').length,
+    2,
+    'the request can be retried after the debounce window'
+  );
+});
+
+test('the last scroll position is reported inside the throttle window', async () => {
+  const reader = loadReader();
+  reader.scroller.clientWidth = 400;
+  reader.scroller.clientHeight = 600;
+  reader.scroller._rect = { top: 0, bottom: 600, left: 0, right: 400 };
+  reader.folio.init(defaults());
+  reader.folio.setChapter({
+    index: 0,
+    html: '',
+    head: '',
+    hasPrev: false,
+    hasNext: false,
+  });
+  await wait(20);
+
+  const section = reader.content.firstElementChild;
+  section.offsetHeight = 1200;
+  reader.scroller.scrollHeight = 1200;
+  reader.scroller.clientHeight = 600;
+  reader.posts.length = 0;
+
+  reader.scroller.scrollTop = 100;
+  reader.scroller.dispatch('scroll', {});
+  reader.scroller.scrollTop = 500;
+  reader.scroller.dispatch('scroll', {});
+  assert.equal(
+    reader.posts.filter((post) => post.type === 'progress').length,
+    0,
+    'the first two events are still throttled'
+  );
+
+  await wait(150);
+  const progress = lastProgress(reader.posts);
+  assert.ok(progress, 'the trailing timer posted the final position');
+  assert.ok(progress.progress > 0.8);
+});
+
+test('a chapter can be streamed in chunks without losing html', async () => {
+  const reader = loadReader();
+  reader.scroller.clientWidth = 400;
+  reader.scroller.clientHeight = 600;
+  reader.scroller._rect = { top: 0, bottom: 600, left: 0, right: 400 };
+  reader.folio.init(defaults());
+  reader.posts.length = 0;
+
+  reader.folio.startChapter({
+    index: 0,
+    head: '',
+    hasPrev: false,
+    hasNext: false,
+    bodyClass: 'note',
+    language: 'it',
+  });
+  reader.folio.appendChapterHtml('<p>Hello ');
+  reader.folio.appendChapterHtml('world</p>');
+  reader.folio.endChapter();
+  await wait(20);
+
+  const section = reader.content.querySelectorAll('.folio-chapter')[0];
+  assert.equal(section.innerHTML, '<p>Hello world</p>');
+  assert.equal(section.className, 'folio-chapter note');
+  assert.equal(section.getAttribute('lang'), 'it');
+  assert.ok(
+    reader.posts.some(
+      (post) => post.type === 'chapterReady' && post.chapterIndex === 0
+    ),
+    'the chapter is announced once it is complete'
+  );
+});
+
+test('CSS hyphenation follows both the switch and justified text', async () => {
+  const reader = loadReader();
+  reader.folio.init(defaults({ hyphenation: true, textAlign: 'justify' }));
+  const root = reader.document.documentElement;
+  assert.equal(root.style.properties['--folio-hyphens'], 'auto');
+
+  reader.folio.setSettings({ hyphenation: false, textAlign: 'justify' });
+  assert.equal(root.style.properties['--folio-hyphens'], 'manual');
+
+  reader.folio.setSettings({ hyphenation: true, textAlign: 'left' });
+  assert.equal(
+    root.style.properties['--folio-hyphens'],
+    'manual',
+    'left-aligned text is never hyphenated'
   );
 });

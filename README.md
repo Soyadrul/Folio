@@ -9,18 +9,22 @@ built with Flutter.
 
 | Feature | Detail |
 |---|---|
-| EPUB support | Full EPUB 2 & 3 rendering via `epub_view` |
+| EPUB support | EPUB 2 & 3, including nested NCX/nav tables of contents |
+| Rendering | Android uses a bundled WebView reader; Linux uses a native Flutter reader |
 | Library scan | Pick any folder; sub-folders are scanned automatically |
 | Resume reading | Last chapter + scroll position saved per book |
 | Table of contents | Slide-out drawer with all chapter links |
+| In-book links | Footnotes and same-chapter links stay inside the reader |
 | Distraction-free reader | Full-screen immersive mode; tap to toggle controls |
 | 4 display modes | **Auto** · **Light** · **Dark** · **Sepia** |
-| Font family | 12 Google Fonts choices (Merriweather, Lora, Garamond…) |
-| Font size | Adjustable from 12 px to 32 px |
-| Line spacing | 1.0 – 2.5 multiplier |
-| Side margins | 8 px – 60 px |
+| Font family | 12 font families bundled for offline use |
+| Font size | Adjustable from 10 px to 40 px |
+| Line spacing | 1.0 – 2.2 multiplier |
+| Side margins | 0 px – 48 px |
+| Reading modes | **Book** (paginated) and **Scroll** (continuous) |
+| Auto-scroll | Adjustable speed with tap-to-start/stop |
 | Progress bar | Thin reading-progress strip (toggleable) |
-| Keep screen on | Prevents display dimming while reading |
+| Keep screen on | Prevents display dimming while reading (Android) |
 | Search | Filter library by title or author |
 | Open from other apps | Android intent filter for `.epub` files |
 
@@ -29,26 +33,47 @@ built with Flutter.
 ## 🗂 Project Structure
 
 ```
-folio_reader/
+Folio/
 ├── lib/
-│   ├── main.dart                  # App entry point & MaterialApp
+│   ├── main.dart                    # Entry point, settings preload, MaterialApp
+│   ├── epub/
+│   │   ├── epub.dart                # Extraction, spine/TOC/cover parsing
+│   │   ├── epub_cover.dart          # Lightweight cover lookup for the library
+│   │   ├── epub_metadata.dart       # Shared title/author metadata reader
+│   │   ├── chapter_html.dart        # Chapter sanitising and URL rewriting
+│   │   └── href_resolver.dart       # EPUB-relative link resolution
+│   ├── library/
+│   │   ├── cover_service.dart       # Cover thumbnails for library cards
+│   │   └── metadata_cache.dart      # JSON cache of scanned book metadata
 │   ├── models/
-│   │   ├── book.dart              # Book data class (path, title, author, cover, progress)
-│   │   └── app_settings.dart      # All user settings + JSON serialisation
+│   │   ├── book.dart                # Book data (path, title, author, cover, progress)
+│   │   └── app_settings.dart        # All user settings + JSON serialisation
 │   ├── providers/
-│   │   ├── library_provider.dart  # Riverpod: folder scan, book list, progress
-│   │   └── settings_provider.dart # Riverpod: settings load/save (SharedPreferences)
+│   │   ├── library_provider.dart    # Riverpod: folder scan, book list, progress
+│   │   └── settings_provider.dart   # Riverpod: settings load/save (SharedPreferences)
+│   ├── reader/
+│   │   ├── webview_reader.dart      # Android WebView reader + JS bridge
+│   │   ├── flutter_reader.dart      # Linux Flutter reader fallback
+│   │   ├── reader_content_controller.dart
+│   │   ├── reading_position.dart    # Per-book position persistence
+│   │   ├── reader_fonts.dart        # Bundled font registration
+│   │   ├── keep_screen_on.dart      # Android window flag bridge
+│   │   ├── volume_keys.dart         # Android volume-key bridge
+│   │   └── webview_security.dart    # Navigation/CSP policy
 │   ├── screens/
-│   │   ├── home_screen.dart       # Library grid with folder picker & search
-│   │   ├── reader_screen.dart     # Full-screen EPUB reader with overlay UI
-│   │   └── settings_screen.dart   # Font, theme, layout, behaviour controls
-│   ├── widgets/
-│   │   └── book_card.dart         # Cover card widget (image or decorative placeholder)
-│   └── utils/
-│       ├── book_scanner.dart      # Recursive .epub finder + epubx metadata parser
-│       └── theme_utils.dart       # Colour helpers, Google Fonts wrappers, ThemeData builders
-├── pubspec.yaml                   # All dependencies (versions verified March 2026)
-└── analysis_options.yaml          # Dart lint configuration
+│   │   ├── home_screen.dart         # Library grid with folder picker & search
+│   │   ├── reader_screen.dart       # Full-screen reader with overlay UI
+│   │   └── settings_screen.dart     # Font, theme, layout, behaviour controls
+│   ├── utils/
+│   │   ├── book_scanner.dart        # Recursive .epub finder
+│   │   ├── open_file_service.dart   # Shared-file (content://) import
+│   │   └── theme_utils.dart         # Colours, fonts, ThemeData builders
+│   └── widgets/
+│       └── book_card.dart           # Cover card widget (image or placeholder)
+├── assets/reader/                   # reader.css, reader.js and WOFF2 fonts
+├── test/                            # Dart/Flutter tests and JS reader tests
+├── pubspec.yaml
+└── analysis_options.yaml
 ```
 
 ---
@@ -59,7 +84,7 @@ folio_reader/
 
 | Tool | Minimum version |
 |---|---|
-| Flutter SDK | 3.38.4 |
+| Flutter SDK | 3.38.4 (CI pins 3.47.7) |
 | Dart SDK | 3.11.0 |
 | Android Studio / SDK | API 35 (Android 15) |
 | CMake | 3.13 (Linux only) |
@@ -88,14 +113,18 @@ flutter build apk --release
 # Output: build/app/outputs/flutter-apk/app-release.apk
 ```
 
+Without `android/key.properties` the release build falls back to the debug
+signing key, which is fine for local testing but must not be published.
+
 ### 3 · Run on Linux
 
 Install the GTK3 development package if you haven't already:
 
 ```bash
-# Debian / Ubuntu / Arch (adjust for your distro)
-sudo apt install libgtk-3-dev        # Debian/Ubuntu
-sudo pacman -S gtk3                  # Arch Linux
+# Debian / Ubuntu
+sudo apt install libgtk-3-dev
+# Arch Linux
+sudo pacman -S gtk3
 ```
 
 Then run:
@@ -108,47 +137,65 @@ For a release build:
 
 ```bash
 flutter build linux --release
-# Output: build/linux/x64/release/bundle/folio_reader
+# Output: build/linux/x64/release/bundle/folio
 ```
+
+---
+
+## 🧪 Testing
+
+```bash
+flutter analyze
+flutter test
+node --check assets/reader/reader.js
+node --test test/js/reader_test.mjs
+```
+
+See [TESTING.md](TESTING.md) for coverage details and the Android manual
+acceptance checklist.
 
 ---
 
 ## 📦 Dependencies
 
-All versions verified against pub.dev in **March 2026**.
-
-| Package | Version | Purpose |
-|---|---|---|
-| `epub_view` | `^3.2.0` | Pure Flutter EPUB 2/3 renderer (no WebView) |
-| `epubx` | `^4.0.0` | Low-level EPUB parser for metadata & cover extraction |
-| `file_picker` | `^10.3.10` | Folder & file picker (SAF on Android, GTK on Linux) |
-| `flutter_riverpod` | `^3.3.1` | Reactive state management |
-| `shared_preferences` | `^2.3.5` | Settings & last-folder persistence |
-| `google_fonts` | `^8.0.2` | Downloadable + cached font families |
-| `path` | `^1.9.1` | Cross-platform path utilities |
-| `path_provider` | `^2.1.5` | Platform-specific directory access |
-| `permission_handler` | `^12.0.1` | Runtime storage permissions on Android |
+| Package | Purpose |
+|---|---|
+| `flutter_inappwebview` | Android WebView that renders chapters with `assets/reader` |
+| `flutter_html` | Native HTML rendering for the Linux reader |
+| `archive` | EPUB ZIP extraction |
+| `xml` | Container/OPF/NCX parsing |
+| `html` | HTML parsing for nav documents and cover pages |
+| `crypto` | Cache keys for extracted books |
+| `image` | Cover thumbnail generation |
+| `file_picker` | Folder & file picker (SAF on Android, GTK on Linux) |
+| `flutter_riverpod` | Reactive state management |
+| `shared_preferences` | Settings & last-folder persistence |
+| `google_fonts` | Font families in the native Linux reader |
+| `path` / `path_provider` | Cross-platform path and directory helpers |
+| `permission_handler` | Runtime storage permissions on Android |
 
 ---
 
 ## 🎨 Design Decisions
 
-### Why `epub_view` instead of a WebView?
-`epub_view` renders EPUB content as native Flutter widgets.  This means it
-works on Linux desktop (which has no WebView), avoids the overhead of a
-Chromium instance on Android, and gives full control over font rendering.
+### Why a WebView on Android?
+The Android reader renders each chapter in a bundled WebView. This keeps the
+reading engine consistent with the CSS/JS in `assets/reader`, supports
+pagination, footnotes and hyphenation, and lets chapters stream in without
+holding a whole book in memory. Linux has no WebView dependency, so it uses
+the native Flutter reader with the same chrome and progress contract.
 
 ### Why Riverpod?
-Riverpod's `StateNotifierProvider` makes it easy to share state (settings,
-library list) between screens without `InheritedWidget` boilerplate or
-`BuildContext` threading issues.  The `StateNotifier` pattern also maps cleanly
-to the "load → mutate → persist" lifecycle of both the settings and library.
+Riverpod's `Notifier`/`NotifierProvider` shares settings and library state
+between screens without `InheritedWidget` boilerplate or `BuildContext`
+threading. The settings notifier loads before the first frame, debounces
+writes, and guards against a late load overwriting a user edit.
 
 ### Reading-mode theming
 Rather than switching the app's global `ThemeData`, the reading mode is applied
-_locally_ inside `ReaderScreen` using a `Theme` widget.  This means the home
-screen and settings page always use the system light/dark theme, while only
-the reader changes its background/text colour.
+_locally_ inside `ReaderScreen` using a `Theme` widget. The home screen and
+settings page always use the system light/dark theme, while only the reader
+changes its background and text colour.
 
 ---
 
@@ -157,17 +204,21 @@ the reader changes its background/text colour.
 | Permission | Why it's needed |
 |---|---|
 | `READ_EXTERNAL_STORAGE` (≤ API 32) | Read `.epub` files from external storage on Android ≤ 12 |
-| `MANAGE_EXTERNAL_STORAGE` (API 30+) | Required to browse arbitrary folders on Android 11+ without SAF |
-| `WAKE_LOCK` | Honours the "keep screen on" setting |
+| `MANAGE_EXTERNAL_STORAGE` (API 30+) | Browse arbitrary folders without SAF |
 | `INTERNET` | Google Fonts downloads font files on first use (cached offline after) |
+
+`MANAGE_EXTERNAL_STORAGE` is a restricted permission on Google Play. A Play
+release must either justify it as a document reader or switch to SAF-only
+access; see the note in `android/app/src/main/AndroidManifest.xml`.
 
 ---
 
 ## 🔧 Customisation Tips
 
-**Adding more fonts** – open `lib/utils/theme_utils.dart` and add any
-[Google Fonts](https://fonts.google.com/) name to `kAvailableFonts`.  The app
-resolves font names at runtime via `google_fonts`, so no extra assets are needed.
+**Adding more fonts** – open `lib/utils/theme_utils.dart` and add a
+[Google Fonts](https://fonts.google.com/) name to `kAvailableFonts`. The native
+Linux reader resolves names through `google_fonts`; the Android WebView uses
+the bundled files in `assets/reader/fonts`.
 
 **Changing the accent colour** – edit `kAccentColor` in `theme_utils.dart`.
 

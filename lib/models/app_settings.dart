@@ -40,10 +40,6 @@ class AppSettings {
   /// Whether hyphenation is enabled for the book text.
   final bool hyphenation;
 
-  /// Language code for hyphenation (e.g., 'en_us', 'it', 'de_1996').
-  /// Defaults to 'en_us' for English US.
-  final String hyphenationLanguage;
-
   // ── Layout ────────────────────────────────────────────────────────────────
 
   /// Horizontal padding (left + right) applied around the book text.
@@ -107,7 +103,6 @@ class AppSettings {
     this.lineHeight = 1.5,
     this.textAlign = TextAlign.justify,
     this.hyphenation = true,
-    this.hyphenationLanguage = 'en_us',
     this.marginHorizontal = 16.0,
     this.readingMode = ReadingMode.light,
     this.keepScreenOn = true,
@@ -131,7 +126,6 @@ class AppSettings {
     double? lineHeight,
     TextAlign? textAlign,
     bool? hyphenation,
-    String? hyphenationLanguage,
     double? marginHorizontal,
     ReadingMode? readingMode,
     bool? keepScreenOn,
@@ -154,7 +148,6 @@ class AppSettings {
       lineHeight: lineHeight ?? this.lineHeight,
       textAlign: textAlign ?? this.textAlign,
       hyphenation: hyphenation ?? this.hyphenation,
-      hyphenationLanguage: hyphenationLanguage ?? this.hyphenationLanguage,
       marginHorizontal: marginHorizontal ?? this.marginHorizontal,
       readingMode: readingMode ?? this.readingMode,
       keepScreenOn: keepScreenOn ?? this.keepScreenOn,
@@ -184,7 +177,6 @@ class AppSettings {
         other.lineHeight == lineHeight &&
         other.textAlign == textAlign &&
         other.hyphenation == hyphenation &&
-        other.hyphenationLanguage == hyphenationLanguage &&
         other.marginHorizontal == marginHorizontal &&
         other.readingMode == readingMode &&
         other.keepScreenOn == keepScreenOn &&
@@ -209,7 +201,6 @@ class AppSettings {
     lineHeight,
     textAlign,
     hyphenation,
-    hyphenationLanguage,
     marginHorizontal,
     readingMode,
     keepScreenOn,
@@ -233,14 +224,13 @@ class AppSettings {
     'fontSize': fontSize,
     'fontFamily': fontFamily,
     'lineHeight': lineHeight,
-    'textAlign': textAlign.index,
+    'textAlign': textAlign.name,
     'hyphenation': hyphenation,
-    'hyphenationLanguage': hyphenationLanguage,
     'marginHorizontal': marginHorizontal,
-    'readingMode': readingMode.index,
+    'readingMode': readingMode.name,
     'keepScreenOn': keepScreenOn,
     'showProgressBar': showProgressBar,
-    'readerMode': readerMode.index,
+    'readerMode': readerMode.name,
     'volumeButtonsTurnPages': volumeButtonsTurnPages,
     'invertVolumeButtons': invertVolumeButtons,
     'tapZones': tapZones,
@@ -263,7 +253,6 @@ class AppSettings {
       TextAlign.justify,
     ),
     hyphenation: json['hyphenation'] as bool? ?? true,
-    hyphenationLanguage: json['hyphenationLanguage'] as String? ?? 'en_us',
     marginHorizontal: _number(
       json['marginHorizontal'],
       16.0,
@@ -310,12 +299,22 @@ class AppSettings {
     return value.clamp(min, max).toDouble();
   }
 
-  static T _enumValue<T>(List<T> values, Object? raw, T fallback) {
+  static T _enumValue<T extends Enum>(List<T> values, Object? raw, T fallback) {
+    if (raw is String) {
+      for (final value in values) {
+        if (value.name == raw) return value;
+      }
+    }
     if (raw is int && raw >= 0 && raw < values.length) return values[raw];
     return fallback;
   }
 
   static ReadingMode _readingMode(Object? raw) {
+    if (raw is String) {
+      for (final mode in ReadingMode.values) {
+        if (mode.name == raw && mode != ReadingMode.auto) return mode;
+      }
+    }
     if (raw is int && raw >= 0 && raw < ReadingMode.values.length) {
       final mode = ReadingMode.values[raw];
       if (mode != ReadingMode.auto) return mode;

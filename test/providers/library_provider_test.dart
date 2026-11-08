@@ -33,6 +33,31 @@ void main() {
     return container;
   }
 
+  test('reports a missing storage permission without scanning', () async {
+    var scanned = false;
+    final container = ProviderContainer(
+      overrides: [
+        libraryProvider.overrideWith(
+          () => LibraryNotifier(
+            scanner: (path, {cachePath}) async {
+              scanned = true;
+              return const LibraryScan();
+            },
+            hasStoragePermission: () async => false,
+          ),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await container.read(libraryProvider.notifier).scanFolder(tmp.path);
+
+    final state = container.read(libraryProvider);
+    expect(scanned, isFalse);
+    expect(state.needsPermission, isTrue);
+    expect(state.errorMessage, contains('Storage permission'));
+  });
+
   test('does not save a folder that does not exist', () async {
     final container = containerWith(
       (path, {cachePath}) async => const LibraryScan(),

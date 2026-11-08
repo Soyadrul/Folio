@@ -2,7 +2,6 @@
 :root {
   --folio-font-size: 18px;
   --folio-line-height: 1.5;
-  --folio-margin: 16px;
   --folio-fg: #1a1a2e;
   --folio-page-width: 320px;
   --folio-page-height: 640px;
@@ -307,13 +306,4 @@ body.folio-book #folio-content blockquote {
   break-inside: avoid;
   -webkit-column-break-inside: avoid;
   page-break-inside: avoid;
-}
-
-/* Hidden helper for "Page X of Y" measurements. */
-#folio-measure {
-  position: absolute;
-  visibility: hidden;
-  pointer-events: none;
-  height: 0;
-  width: 0;
 }
