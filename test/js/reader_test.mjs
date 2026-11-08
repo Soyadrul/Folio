@@ -64,6 +64,8 @@ class Element {
     this.offsetTop = 0;
     this.offsetHeight = 0;
     this._html = '';
+    this._textContent = null;
+    this._fontSize = null;
     this._rect = { top: 0, bottom: 0, left: 0, right: 0 };
     this._listeners = new Map();
     this.onScrollIntoView = null;
@@ -86,6 +88,14 @@ class Element {
   set innerHTML(value) {
     this._html = String(value);
     this.children = [];
+  }
+  get textContent() {
+    if (this._textContent !== null) return this._textContent;
+    const own = this._html.replace(/<[^>]*>/g, '');
+    return own + this.children.map((child) => child.textContent).join('');
+  }
+  set textContent(value) {
+    this._textContent = String(value);
   }
   get firstElementChild() {
     return this.children[0] || null;
@@ -164,6 +174,7 @@ class Element {
 
 function matches(element, rawSelector) {
   const selector = rawSelector.trim();
+  if (selector === '*') return true;
   if (selector.startsWith('.')) {
     return element._classes.has(selector.slice(1));
   }
@@ -234,10 +245,14 @@ function buildDocument() {
 function loadReader() {
   const { document, viewport, scroller, content, head } = buildDocument();
   const posts = [];
+  const getComputedStyle = (element) => ({
+    fontSize: `${element._fontSize == null ? 16 : element._fontSize}px`,
+  });
   const window = {
     innerWidth: 400,
     innerHeight: 600,
     addEventListener() {},
+    getComputedStyle,
     flutter_inappwebview: {
       callHandler(name, payload) {
         posts.push(JSON.parse(JSON.stringify(payload)));
@@ -247,6 +262,7 @@ function loadReader() {
   const context = vm.createContext({
     document,
     window,
+    getComputedStyle,
     requestAnimationFrame: (callback) => {
       callback(performance.now());
       return 1;
@@ -388,6 +404,104 @@ test('font faces can be replaced without recreating the style element', async ()
   );
   assert.equal(style.textContent, '/* next family */');
   await wait(120);
+});
+
+function addParagraph(reader, section, { size, text, childSize, childText } = {}) {
+  const paragraph = reader.document.createElement('p');
+  paragraph._fontSize = size;
+  if (childSize != null) {
+    const span = reader.document.createElement('span');
+    span._fontSize = childSize;
+    span.textContent = childText || text || '';
+    paragraph.appendChild(span);
+    // The stub does not parse innerHTML, so give the paragraph the text that
+    // its descendant contributes.
+    paragraph.textContent = span.textContent;
+  } else {
+    paragraph.textContent = text || '';
+  }
+  section.appendChild(paragraph);
+  return paragraph;
+}
+
+test('a chapter is scaled so its body text matches the font size setting', () => {
+  const reader = loadReader();
+  reader.folio.init(defaults({ fontSize: 18 }));
+
+  // Dune-style markup: the publisher reduces the body to 0.75em and scales the
+  // inline span back up with 1.33333em. Forcing the paragraph to 18px leaves
+  // the span at 24px unless the whole chapter is normalised.
+  const section = addSection(reader);
+  section._fontSize = 18;
+  addParagraph(reader, section, {
+    size: 18,
+    childSize: 24,
+    childText: 'x'.repeat(1000),
+  });
+
+  reader.folio.setSettings({});
+
+  assert.equal(
+    section.style.properties['--folio-chapter-font-size'],
+    '13.5px'
+  );
+});
+
+test('a chapter whose text already matches the setting is left alone', () => {
+  const reader = loadReader();
+  reader.folio.init(defaults({ fontSize: 18 }));
+
+  const section = addSection(reader);
+  section._fontSize = 18;
+  addParagraph(reader, section, { size: 18, text: 'x'.repeat(1000) });
+
+  reader.folio.setSettings({});
+
+  assert.equal(section.style.properties['--folio-chapter-font-size'], '18px');
+});
+
+test('headings and small inline text do not decide the chapter scale', () => {
+  const reader = loadReader();
+  reader.folio.init(defaults({ fontSize: 18 }));
+
+  const section = addSection(reader);
+  section._fontSize = 18;
+  const heading = reader.document.createElement('h1');
+  heading._fontSize = 36;
+  heading.textContent = 'x'.repeat(5000);
+  section.appendChild(heading);
+  addParagraph(reader, section, { size: 18, text: 'x'.repeat(1000) });
+  addParagraph(reader, section, {
+    size: 18,
+    childSize: 13.5,
+    childText: 'x'.repeat(100),
+  });
+
+  reader.folio.setSettings({});
+
+  assert.equal(section.style.properties['--folio-chapter-font-size'], '18px');
+});
+
+test('changing the font size rescales an already normalised chapter', () => {
+  const reader = loadReader();
+  reader.folio.init(defaults({ fontSize: 18 }));
+
+  const section = addSection(reader);
+  section._fontSize = 18;
+  addParagraph(reader, section, {
+    size: 18,
+    childSize: 24,
+    childText: 'x'.repeat(1000),
+  });
+  reader.folio.setSettings({});
+  assert.equal(
+    section.style.properties['--folio-chapter-font-size'],
+    '13.5px'
+  );
+
+  reader.folio.setSettings({ fontSize: 20 });
+
+  assert.equal(section.style.properties['--folio-chapter-font-size'], '15px');
 });
 
 test('book restore ignores the shell id and uses the saved progress', async () => {

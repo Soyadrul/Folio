@@ -113,6 +113,78 @@
     document.body.classList.toggle('folio-scroll', !isBook());
   }
 
+  const HEADING_TAGS = {
+    h1: true,
+    h2: true,
+    h3: true,
+    h4: true,
+    h5: true,
+    h6: true,
+  };
+  const NON_TEXT_TAGS = { script: true, style: true };
+
+  // Length of the text that belongs directly to an element, excluding text
+  // inside its children. Whitespace is ignored so indentation cannot outweigh
+  // real prose when the chapter's dominant size is measured.
+  function textLength(element) {
+    return (element.textContent || '').replace(/\s+/g, '').length;
+  }
+
+  function directTextLength(element) {
+    let children = 0;
+    for (const child of element.children) children += textLength(child);
+    return Math.max(0, textLength(element) - children);
+  }
+
+  // The size the chapter's body text has *relative to its section* under the
+  // publisher's own CSS. Some books reduce the body to 0.75em and scale inline
+  // spans back up with 1.33333em; forcing only the paragraph to the user size
+  // leaves those spans 33% larger. Measuring the dominant text run lets the
+  // reader scale the whole chapter uniformly instead, which keeps the book's
+  // internal hierarchy (headings, small caps, footnotes) intact.
+  function chapterTextMultiplier(section) {
+    if (!section || !window.getComputedStyle) return 1;
+    const base = parseFloat(window.getComputedStyle(section).fontSize) || 0;
+    if (!base) return 1;
+
+    const weights = new Map();
+    const elements = [section].concat(
+      Array.prototype.slice.call(section.querySelectorAll('*'))
+    );
+    for (const element of elements) {
+      const tag = String(element.localName || element.tagName || '').toLowerCase();
+      if (NON_TEXT_TAGS[tag] || HEADING_TAGS[tag]) continue;
+      const length = directTextLength(element);
+      if (length === 0) continue;
+      const computed = window.getComputedStyle(element);
+      if (computed.display === 'none' || computed.visibility === 'hidden') {
+        continue;
+      }
+      const size = parseFloat(computed.fontSize) || 0;
+      if (!size) continue;
+      weights.set(size, (weights.get(size) || 0) + length);
+    }
+
+    let best = 0;
+    let bestWeight = 0;
+    for (const [size, weight] of weights) {
+      if (weight > bestWeight || (weight === bestWeight && size > best)) {
+        best = size;
+        bestWeight = weight;
+      }
+    }
+    return best > 0 ? best / base : 1;
+  }
+
+  function normalizeSectionScale(section) {
+    if (!section) return;
+    const multiplier = chapterTextMultiplier(section);
+    if (!isFinite(multiplier) || multiplier <= 0) return;
+    const size =
+      Math.round((state.settings.fontSize / multiplier) * 100) / 100;
+    section.style.setProperty('--folio-chapter-font-size', size + 'px');
+  }
+
   // Dart embeds the selected font as base64 @font-face rules. Keeping them in
   // one style element lets a font change take effect without reloading the
   // shell (which would lose the reading position).
@@ -593,6 +665,9 @@
     chapterTransfer.element = null;
     if (!target || !el) return;
     el.innerHTML = html;
+    // Measure before the first layout so pagination and progress restoration
+    // use the normalised font size.
+    normalizeSectionScale(el);
 
     if (target === 'replace') {
       requestAnimationFrame(function () {
@@ -620,6 +695,7 @@
     if (target === 'append') {
       content().appendChild(el);
       mergeHead(payload);
+      normalizeSectionScale(el);
       state.loadedEnd = payload.index;
       state.hasNext = !!payload.hasNext;
       // If auto-scroll is running, let it continue into the new content.
@@ -633,6 +709,7 @@
     const before = scroller().scrollHeight;
     content().insertBefore(el, current);
     mergeHead(payload);
+    normalizeSectionScale(el);
     state.loadedStart = payload.index;
     state.hasPrev = !!payload.hasPrev;
     if (!isBook()) {
@@ -668,6 +745,9 @@
     state.auto.speed = Number(state.settings.scrollSpeed) || 40;
     setModeClass();
     applyCssVariables();
+    // The section scale depends on the user's font size, so every loaded
+    // chapter must be measured again before the new layout is computed.
+    sections().forEach(normalizeSectionScale);
     if (isBook()) {
       pauseAutoScroll();
     } else {
@@ -948,6 +1028,8 @@
   }
 
   function onResize() {
+    // Books that size text with viewport units need a fresh measurement.
+    sections().forEach(normalizeSectionScale);
     relayout(80);
   }
 

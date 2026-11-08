@@ -74,12 +74,15 @@ body {
   background-color: transparent !important;
 }
 
-/* User typography wins over the book's own rules. Headings are deliberately
-   left out of the font-size rule so their hierarchy still scales from the
-   chapter's base size. */
+/* User typography wins over the book's own rules. The chapter's base size is
+   set by JS: the shell measures the publisher's dominant body-text size and
+   scales the whole section so that text lands on the user's font size. This
+   keeps headings, small caps and footnotes in proportion, and stops a book
+   that wraps every paragraph in a scaled-up <span> from rendering larger than
+   a book that does not. */
 #folio-content .folio-chapter {
   font-family: var(--folio-font-family) !important;
-  font-size: var(--folio-font-size) !important;
+  font-size: var(--folio-chapter-font-size, var(--folio-font-size)) !important;
   line-height: var(--folio-line-height) !important;
   text-align: var(--folio-align) !important;
   color: var(--folio-fg) !important;
@@ -87,6 +90,9 @@ body {
   -webkit-hyphens: var(--folio-hyphens) !important;
 }
 
+/* Paragraph text always follows the section size, so a publisher rule in
+   absolute units (px/pt) cannot ignore the user's setting. Inline elements keep
+   their relative sizes; the section scale accounts for those. */
 #folio-content .folio-chapter p,
 #folio-content .folio-chapter li,
 #folio-content .folio-chapter dd,
@@ -96,7 +102,7 @@ body {
 #folio-content .folio-chapter td,
 #folio-content .folio-chapter th {
   font-family: var(--folio-font-family) !important;
-  font-size: var(--folio-font-size) !important;
+  font-size: inherit !important;
   line-height: var(--folio-line-height) !important;
   text-align: var(--folio-align) !important;
   color: var(--folio-fg) !important;
