@@ -10,6 +10,7 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
+import java.security.MessageDigest
 
 /**
  * Forwards the hardware volume keys to Flutter while a book is open and
@@ -99,6 +100,17 @@ class MainActivity : FlutterActivity() {
                 }
             }
         }
+        Thread {
+            val incoming = File(cacheDir, "incoming")
+            val entries = incoming.listFiles() ?: return@Thread
+            val cutoff = System.currentTimeMillis() - 7L * 24 * 60 * 60 * 1000
+            for (entry in entries) {
+                if (!entry.isFile) continue
+                if (entry.name.endsWith(".part") || entry.lastModified() < cutoff) {
+                    entry.delete()
+                }
+            }
+        }.start()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -136,6 +148,12 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    /**
+     * Copies a `content://` EPUB into the cache under a name derived from the
+     * URI, so opening the same book twice also reuses the same path (and the
+     * reading position stored for it). A stale `.part` file from a killed
+     * process is never mistaken for a finished copy.
+     */
     private fun copyToCache(uri: Uri): String? {
         val name = displayName(uri) ?: "book.epub"
         val safeName = name
@@ -148,10 +166,26 @@ class MainActivity : FlutterActivity() {
         }
         val dir = File(cacheDir, "incoming")
         if (!dir.exists() && !dir.mkdirs()) return null
-        val target = File(dir, "${System.currentTimeMillis()}-$fileName")
+
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest(uri.toString().toByteArray())
+            .joinToString("") { "%02x".format(it) }
+            .take(16)
+        val target = File(dir, "$digest-$fileName")
+        if (target.isFile && target.length() > 0) return target.absolutePath
+
+        val partial = File(dir, "$digest-$fileName.part")
         val input = contentResolver.openInputStream(uri) ?: return null
         input.use { source ->
-            target.outputStream().use { sink -> source.copyTo(sink) }
+            partial.outputStream().use { sink -> source.copyTo(sink) }
+        }
+        if (partial.length() == 0L) {
+            partial.delete()
+            return null
+        }
+        if (!partial.renameTo(target)) {
+            partial.delete()
+            return null
         }
         return target.absolutePath
     }

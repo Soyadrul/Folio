@@ -46,4 +46,13 @@ void main() {
     expect(source, contains('InputFileStream'));
     expect(source, isNot(contains('readAsBytes()')));
   });
+
+  test('files opened from other apps keep a stable cache name', () {
+    final source = File(
+      'android/app/src/main/kotlin/com/github/Soyadrul/Folio/MainActivity.kt',
+    ).readAsStringSync();
+    expect(source, contains('MessageDigest.getInstance("SHA-256")'));
+    expect(source, isNot(contains('System.currentTimeMillis()}-\$fileName')));
+    expect(source, contains('.part'));
+  });
 }

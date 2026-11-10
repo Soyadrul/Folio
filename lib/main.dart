@@ -20,8 +20,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 
 import 'epub/epub_metadata.dart';
+import 'library/cache_maintenance.dart';
 import 'models/book.dart';
 import 'providers/settings_provider.dart';
 import 'screens/home_screen.dart';
@@ -77,9 +79,15 @@ class _FolioAppState extends State<FolioApp> {
     _openSubscription = _openFiles.files.listen(_handleOpenFile);
     // Start the channel after the first frame so a pending file has a
     // navigator to open into.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
       _ready = true;
+      // Old copies of files opened from other apps are never reused; drop them
+      // so the cache cannot grow without bound. This runs before the intent
+      // channel starts: Android only begins copying after `ready`, so pruning
+      // here can never delete a `.part` file that is still being written.
+      await _pruneCaches();
+      if (!mounted) return;
       _openFiles.start();
       if (_pendingOpenFiles.isNotEmpty) {
         final pending = List<String>.from(_pendingOpenFiles);
@@ -96,6 +104,15 @@ class _FolioAppState extends State<FolioApp> {
     _openSubscription?.cancel();
     _openFiles.dispose();
     super.dispose();
+  }
+
+  Future<void> _pruneCaches() async {
+    try {
+      final cache = await getTemporaryDirectory();
+      await pruneIncomingFiles(cache);
+    } catch (error) {
+      debugPrint('Folio: could not prune the cache: $error');
+    }
   }
 
   Future<void> _handleOpenFile(String path) async {
