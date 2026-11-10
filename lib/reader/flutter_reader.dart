@@ -406,6 +406,11 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
   }
 
   @override
+  Future<void> pushHistory() async {
+    _pushHistory();
+  }
+
+  @override
   Future<void> toggleAutoScroll() async {
     if (_autoRunning) {
       await pauseAutoScroll();

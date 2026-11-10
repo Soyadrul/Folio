@@ -968,3 +968,14 @@ test('a non-adjacent append is rejected even without transfer ids', () => {
     .map((section) => section.getAttribute('data-folio-index'));
   assert.deepEqual(indexes, ['4']);
 });
+
+test('pushHistory records the current chapter for goBack', async () => {
+  const { folio, posts } = loadReader();
+
+  folio.setChapter({ index: 2, html: '<p>two</p>' });
+  folio.pushHistory();
+
+  const history = posts.filter((post) => post.type === 'history');
+  assert.ok(history.length > 0);
+  assert.equal(history[history.length - 1].canGoBack, true);
+});

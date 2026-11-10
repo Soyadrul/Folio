@@ -1075,6 +1075,7 @@
     nextPage: nextPage,
     prevPage: prevPage,
     goBack: goBack,
+    pushHistory: pushHistory,
     goToProgress: goToProgress,
     startAutoScroll: startAutoScroll,
     pauseAutoScroll: pauseAutoScroll,

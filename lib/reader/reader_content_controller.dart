@@ -2,6 +2,9 @@
 /// mounted (WebView on Android, Flutter fallback on Linux).
 abstract class ReaderViewBackend {
   Future<void> loadChapter(int index, {double progress = 0, String? element});
+
+  /// Records the current position so `goBack()` can return to it.
+  Future<void> pushHistory();
   Future<void> nextPage();
   Future<void> prevPage();
   Future<void> goBack();
@@ -29,6 +32,20 @@ class ReaderContentController implements ReaderViewBackend {
   Future<void> loadChapter(int index, {double progress = 0, String? element}) =>
       _backend?.loadChapter(index, progress: progress, element: element) ??
       Future<void>.value();
+
+  @override
+  Future<void> pushHistory() => _backend?.pushHistory() ?? Future<void>.value();
+
+  /// Jumps to a TOC entry after saving the current position, so the back
+  /// button can undo a contents jump exactly like a link tap.
+  Future<void> openChapter(
+    int index, {
+    double progress = 0,
+    String? element,
+  }) async {
+    await pushHistory();
+    await loadChapter(index, progress: progress, element: element);
+  }
 
   @override
   Future<void> nextPage() => _backend?.nextPage() ?? Future<void>.value();

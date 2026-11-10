@@ -654,6 +654,11 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
   }
 
   @override
+  Future<void> pushHistory() async {
+    await _controller?.evaluateJavascript(source: 'folio.pushHistory();');
+  }
+
+  @override
   Future<void> loadChapter(
     int index, {
     double progress = 0,

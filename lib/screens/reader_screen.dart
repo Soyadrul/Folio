@@ -807,6 +807,9 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
                 ),
               )
               .toList();
+    final selectedEntry = entries.indexWhere(
+      (entry) => entry.chapterIndex == _chapterIndex,
+    );
     return Drawer(
       backgroundColor: readerBackground(
         ref.read(settingsNotifierProvider).readingMode,
@@ -857,7 +860,7 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
                 itemCount: entries.length,
                 itemBuilder: (context, index) {
                   final entry = entries[index];
-                  final selected = entry.chapterIndex == _chapterIndex;
+                  final selected = index == selectedEntry;
                   return ListTile(
                     dense: true,
                     contentPadding: EdgeInsets.only(
@@ -880,7 +883,7 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
                     ),
                     onTap: () {
                       Navigator.of(context).pop();
-                      _content.loadChapter(
+                      _content.openChapter(
                         entry.chapterIndex,
                         progress: 0,
                         element: entry.fragment,
