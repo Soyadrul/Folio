@@ -1,20 +1,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
           xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- ── Storage permissions ──────────────────────────────────────────────
-         Android ≤ 12  → READ_EXTERNAL_STORAGE covers /sdcard and removable media.
-         Android 13+   → READ_MEDIA_IMAGES / READ_MEDIA_VIDEO are scoped; for
-                         arbitrary file access (epub files anywhere) we still
-                         need MANAGE_EXTERNAL_STORAGE or use SAF (file_picker
-                         already uses SAF on 13+, so the permission is only a
-                         fallback for older devices).
-
-         Play policy: MANAGE_EXTERNAL_STORAGE ("All files access") is a
-         restricted permission. If Folio is published on Google Play, the
-         declaration must be justified as a file manager / document reader, or
-         the permission must be dropped in favour of SAF-only access. Keep this
-         note in sync with the Play Console declaration.
-    ─────────────────────────────────────────────────────────────────────── -->
+    <!-- Android 10 (API 29) and older: READ_EXTERNAL_STORAGE is enough for
+         direct path access. Android 11+ (API 30): all-files access is required
+         for non-media files such as .epub; the activity reports Build.VERSION
+         so the app can ask for the right permission. The flag is requested
+         dynamically, never assumed. -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
@@ -28,7 +19,6 @@
         android:label="Folio"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
-        android:requestLegacyExternalStorage="true"
         android:allowBackup="true"
         android:fullBackupContent="@xml/backup_rules"
         android:dataExtractionRules="@xml/data_extraction_rules"

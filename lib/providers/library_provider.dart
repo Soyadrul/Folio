@@ -4,11 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/book.dart';
 import '../reader/reading_position.dart';
+import '../utils/android_storage.dart';
 import '../utils/book_scanner.dart';
 
 // ── Persistence keys ───────────────────────────────────────────────────────
@@ -120,9 +120,7 @@ class LibraryNotifier extends Notifier<LibraryState> {
   Future<bool> _hasStoragePermission() async {
     final override = _hasStoragePermissionOverride;
     if (override != null) return override();
-    if (!Platform.isAndroid) return true;
-    if (await Permission.manageExternalStorage.isGranted) return true;
-    return Permission.storage.isGranted;
+    return hasStorageAccess();
   }
 
   /// Restores the previously selected folder and re-scans it on startup.
@@ -184,6 +182,12 @@ class LibraryNotifier extends Notifier<LibraryState> {
       final books = await _withSavedPositions(scanned.books);
       if (token != _scanToken) return;
       final permissionProblem = scanned.permissionDenied;
+      final warning =
+          _warningFor(scanned) ??
+          (Platform.isAndroid && books.isEmpty
+              ? 'No EPUB files were found. On Android 11 and newer, grant '
+                    '"All files access" or choose a folder under Documents.'
+              : null);
       state = state.copyWith(
         books: books,
         isLoading: false,
@@ -191,7 +195,7 @@ class LibraryNotifier extends Notifier<LibraryState> {
         errorMessage: permissionProblem && books.isEmpty
             ? 'Storage permission is required to read your books.'
             : null,
-        warningMessage: _warningFor(scanned),
+        warningMessage: warning,
         clearError: !(permissionProblem && books.isEmpty),
         clearWarning: false,
       );

@@ -2,6 +2,7 @@ package com.github.Soyadrul.Folio
 
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.OpenableColumns
 import android.view.KeyEvent
@@ -74,6 +75,7 @@ class MainActivity : FlutterActivity() {
                     }
                     result.success(null)
                 }
+                "sdkInt" -> result.success(Build.VERSION.SDK_INT)
                 else -> result.notImplemented()
             }
         }

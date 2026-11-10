@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,6 +6,7 @@ import 'package:permission_handler/permission_handler.dart';
 
 import '../models/book.dart';
 import '../providers/library_provider.dart';
+import '../utils/android_storage.dart';
 import '../utils/theme_utils.dart';
 import '../widgets/book_card.dart';
 import 'reader_screen.dart';
@@ -34,12 +33,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   /// Checks storage access and asks for it when Android has not granted it.
   Future<bool> _ensureStoragePermission() async {
-    if (!Platform.isAndroid) return true;
-    if (await Permission.manageExternalStorage.isGranted) return true;
-    if (await Permission.storage.isGranted) return true;
-    final status = await Permission.manageExternalStorage.request();
-    if (status.isGranted) return true;
-    return Permission.storage.request().then((s) => s.isGranted);
+    return requestStorageAccess();
   }
 
   Future<void> _pickFolder() async {
