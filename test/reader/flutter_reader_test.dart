@@ -127,6 +127,32 @@ void main() {
     expect(changes, [0, 1]);
     expect(controller.currentChapter, 1);
   });
+
+  testWidgets('an in-chapter fragment link jumps to the decoded anchor', (
+    tester,
+  ) async {
+    final document = _FakeDocument([
+      '<p><a href="#note%201">jump</a></p>'
+          '${_longBody()}<aside id="note 1">The note.</aside>',
+    ]);
+    final changes = <int>[];
+    final controller = ReaderContentController();
+
+    await _pumpReader(
+      tester,
+      _readerApp(document: document, controller: controller, changes: changes),
+    );
+    final scrollable = tester.state<ScrollableState>(
+      find.byType(Scrollable).first,
+    );
+    expect(scrollable.position.pixels, 0);
+
+    await tester.tapOnText(find.textRange.ofSubstring('jump'));
+    await _pumpFrames(tester, 3);
+
+    expect(tester.takeException(), isNull);
+    expect(scrollable.position.pixels, greaterThan(0));
+  });
 }
 
 Widget _readerApp({

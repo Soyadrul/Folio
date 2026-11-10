@@ -176,6 +176,44 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
     });
   }
 
+  /// Handles a tapped link from either flutter_html callback.
+  ///
+  /// flutter_html only calls [onLinkTap] when no [onAnchorTap] is supplied,
+  /// and its anchor callback is invoked for every `<a href>`, not just
+  /// `#fragment` links. Both entry points therefore route through here so
+  /// encoded anchors are decoded and cross-chapter links still resolve.
+  void _openLink(String? url) {
+    if (url == null) return;
+    final uri = Uri.tryParse(url);
+    if (uri != null && (uri.scheme == 'http' || uri.scheme == 'https')) {
+      widget.callbacks.onError?.call('External links are not opened by Folio.');
+      return;
+    }
+    if (url.startsWith('#')) {
+      final id = Uri.decodeComponent(url.substring(1));
+      _pushHistory();
+      _jumpToAnchor(id);
+      _report(force: true);
+      return;
+    }
+    // `Uri.toFilePath()` throws when the URI still carries a fragment, so
+    // split the link the same way the WebView reader does.
+    final link = parseFileLink(url);
+    if (link == null) {
+      widget.callbacks.onError?.call('This link is not opened by Folio.');
+      return;
+    }
+    final chapter = widget.document.allDocuments
+        .where((c) => p.equals(c.path, link.path))
+        .firstOrNull;
+    if (chapter == null) {
+      widget.callbacks.onError?.call('This link points outside the book.');
+      return;
+    }
+    _pushHistory();
+    _load(chapter.index, element: link.fragment);
+  }
+
   /// Scrolls to [id] inside the chapter that is currently rendered.
   bool _jumpToAnchor(String? id) {
     if (id == null || id.isEmpty) return false;
@@ -453,45 +491,12 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
               'html': Style(backgroundColor: Colors.transparent),
               'p': Style(margin: Margins.only(bottom: 10)),
             },
-            onLinkTap: (url, attributes, element) {
-              if (url == null) return;
-              final uri = Uri.tryParse(url);
-              if (uri != null &&
-                  (uri.scheme == 'http' || uri.scheme == 'https')) {
-                widget.callbacks.onError?.call(
-                  'External links are not opened by Folio.',
-                );
-                return;
-              }
-              if (url.startsWith('#')) {
-                final id = Uri.decodeComponent(url.substring(1));
-                _pushHistory();
-                _jumpToAnchor(id);
-                _report(force: true);
-                return;
-              }
-              // `Uri.toFilePath()` throws when the URI still carries a
-              // fragment, so split the link the same way the WebView reader
-              // does.
-              final link = parseFileLink(url);
-              if (link == null) {
-                widget.callbacks.onError?.call(
-                  'This link is not opened by Folio.',
-                );
-                return;
-              }
-              final chapter = widget.document.allDocuments
-                  .where((c) => p.equals(c.path, link.path))
-                  .firstOrNull;
-              if (chapter == null) {
-                widget.callbacks.onError?.call(
-                  'This link points outside the book.',
-                );
-                return;
-              }
-              _pushHistory();
-              _load(chapter.index, element: link.fragment);
-            },
+            onLinkTap: (url, attributes, element) => _openLink(url),
+            // flutter_html hands every `<a href>` tap to its anchor callback
+            // when one is supplied, so both callbacks share [_openLink]. This
+            // also replaces the library's anchor lookup, which would search
+            // for the raw, still-encoded fragment (`note%201`).
+            onAnchorTap: (url, attributes, element) => _openLink(url),
             extensions: [
               TagExtension(
                 tagsToExtend: {'img'},
