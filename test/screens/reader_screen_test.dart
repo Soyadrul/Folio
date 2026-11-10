@@ -209,6 +209,50 @@ void main() {
 
     expect(find.text('This link points outside the book.'), findsNothing);
   });
+
+  testWidgets('a negative chapter index never reaches the saved position', (
+    tester,
+  ) async {
+    final book = Book(path: epub.path, title: 'Old Book', author: 'Jane Doe');
+    final loader = EpubLoader(cacheRoot: Directory(p.join(tmp.path, 'cache')));
+
+    await tester.runAsync(() async {
+      await tester.pumpWidget(
+        ProviderScope(
+          child: MaterialApp(
+            theme: buildLightTheme(),
+            home: ReaderScreen(book: book, loader: loader),
+          ),
+        ),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 1500));
+    });
+    await tester.pump();
+
+    final state = tester.state<ReaderScreenState>(find.byType(ReaderScreen));
+    final callbacks = state.createCallbacks();
+    callbacks.onProgress!(
+      const ReaderProgressEvent(
+        chapterIndex: -1,
+        progress: 0,
+        page: 1,
+        pages: 1,
+      ),
+    );
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 100));
+
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString('folio_reading_position:${epub.path}');
+    expect(raw, isNotNull);
+    final stored = jsonDecode(raw!) as Map<String, dynamic>;
+    // `ReadingPosition.fromJson` clamps a negative index, so check the stored
+    // value too: the placeholder must never be what the reader writes down.
+    expect(stored['chapterIndex'], greaterThanOrEqualTo(0));
+    final saved = ReadingPosition.fromJson(stored);
+    expect(saved.chapterIndex, greaterThanOrEqualTo(0));
+  });
 }
 
 /// Answers every HTTP request with a future that never completes, so font

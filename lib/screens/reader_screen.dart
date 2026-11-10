@@ -225,6 +225,9 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
 
   void _onProgress(ReaderProgressEvent event) {
     if (!mounted) return;
+    // The shell can emit a placeholder while its layout is empty; never let it
+    // overwrite the chapter the reader restored.
+    if (event.chapterIndex < 0) return;
     // A progress event means the last navigation worked, so any transient
     // error from the previous one is no longer relevant.
     _clearRuntimeError();
@@ -281,13 +284,14 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
 
   void _persistPosition({bool force = false}) {
     if (_document == null) return;
+    final chapter = _chapterIndex < 0 ? 0 : _chapterIndex;
     final now = DateTime.now().millisecondsSinceEpoch;
     if (!force && now - _lastSavedMs < 500) return;
     _lastSavedMs = now;
     final overall = _overallProgress;
     _library.updateReadingProgress(
       widget.book.path,
-      _chapterIndex,
+      chapter,
       _chapterProgress,
       overallProgress: overall,
     );
@@ -296,7 +300,7 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
           .save(
             widget.book.path,
             ReadingPosition(
-              chapterIndex: _chapterIndex,
+              chapterIndex: chapter,
               progress: _chapterProgress,
               element: _element,
               overallProgress: overall,

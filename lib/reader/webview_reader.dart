@@ -34,6 +34,28 @@ class ReaderProgressEvent {
   final String? element;
 }
 
+/// Parses a `progress` bridge message, rejecting the shell's pre-chapter
+/// placeholder (`chapterIndex: -1`) and malformed payloads.
+ReaderProgressEvent? progressEventFromMessage(Map<String, dynamic> message) {
+  if (message['type'] != 'progress') return null;
+  final chapter = (message['chapterIndex'] as num?)?.toInt() ?? -1;
+  if (chapter < 0) return null;
+  final rawProgress = (message['progress'] as num?)?.toDouble() ?? 0;
+  final progress = rawProgress.isFinite
+      ? rawProgress.clamp(0.0, 1.0).toDouble()
+      : 0.0;
+  final page = (message['page'] as num?)?.toInt() ?? 1;
+  final pages = (message['pages'] as num?)?.toInt() ?? 1;
+  final element = message['element'];
+  return ReaderProgressEvent(
+    chapterIndex: chapter,
+    progress: progress,
+    page: page < 1 ? 1 : page,
+    pages: pages < 1 ? 1 : pages,
+    element: element is String && element.isNotEmpty ? element : null,
+  );
+}
+
 class ReaderCallbacks {
   const ReaderCallbacks({
     this.onProgress,
@@ -104,6 +126,12 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
   String? _pendingElement;
   double _lastProgress = 0;
   String? _lastElement;
+
+  /// Values used by `_onLoadStop` to restore the reader after the shell
+  /// reloads. Only chapter loads and real progress events update them; the
+  /// shell's pre-chapter placeholder never reaches them.
+  double _restoreProgress = 0;
+  String? _restoreElement;
   bool _autoScrollRunning = false;
   int _autoScrollSpeed = 40;
 
@@ -127,6 +155,8 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
     _requestedChapter = widget.initialChapter;
     _lastProgress = widget.initialProgress;
     _lastElement = widget.initialElement;
+    _restoreProgress = widget.initialProgress;
+    _restoreElement = widget.initialElement;
     _loadShell();
   }
 
@@ -244,12 +274,17 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
     // A settings change during shell construction may have selected another
     // family; make sure the shell has the matching bytes before it is used.
     await _ensureFontFaces();
+    if (!mounted) return;
     await controller.evaluateJavascript(
       source: 'folio.init(${jsonEncode(_settingsJson())});',
     );
+    if (!mounted) return;
     widget.callbacks.onReady?.call();
-    final chapter = int.tryParse(_requestedChapter.toString()) ?? 0;
-    await _loadChapter(chapter, progress: _lastProgress, element: _lastElement);
+    await _loadChapter(
+      _requestedChapter < 0 ? 0 : _requestedChapter,
+      progress: _restoreProgress,
+      element: _restoreElement,
+    );
   }
 
   Map<String, dynamic> _settingsJson() {
@@ -378,6 +413,8 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
       _currentChapter = index;
       _lastProgress = progress;
       _lastElement = element;
+      _restoreProgress = progress;
+      _restoreElement = element;
       // `chapterReady` below is the authoritative notification: the chapter is
       // only usable once JavaScript has installed and restored it.
       if (!_shellReady || _controller == null) return;
@@ -469,13 +506,10 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
     final message = Map<String, dynamic>.from(raw);
     switch (message['type']) {
       case 'progress':
-        final event = ReaderProgressEvent(
-          chapterIndex: (message['chapterIndex'] as num?)?.toInt() ?? 0,
-          progress: (message['progress'] as num?)?.toDouble() ?? 0,
-          page: (message['page'] as num?)?.toInt() ?? 1,
-          pages: (message['pages'] as num?)?.toInt() ?? 1,
-          element: message['element'] as String?,
-        );
+        final event = progressEventFromMessage(message);
+        if (event == null) break;
+        _restoreProgress = event.progress;
+        _restoreElement = event.element;
         _lastProgress = event.progress;
         _lastElement = event.element;
         // In scroll mode chapters are appended in place, so the visible
@@ -669,6 +703,8 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
         _pendingChapter = null;
         _pendingProgress = 0;
         _pendingElement = null;
+        _restoreProgress = _lastProgress;
+        _restoreElement = _lastElement;
         _requestedChapter = _currentChapter;
         widget.callbacks.onError?.call(
           detail.didCrash
