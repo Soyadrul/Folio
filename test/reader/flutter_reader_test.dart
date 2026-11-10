@@ -104,6 +104,29 @@ void main() {
     expect(controller.currentChapter, 2);
     expect(changes, [0, 1, 2]);
   });
+
+  testWidgets('tapping a link with a fragment decodes the anchor', (
+    tester,
+  ) async {
+    final document = _FakeDocument([
+      '<p><a href="file:///book/text/ch2.xhtml#note%201">note</a></p>',
+      '<aside id="note 1">The note.</aside>',
+    ]);
+    final changes = <int>[];
+    final controller = ReaderContentController();
+
+    await _pumpReader(
+      tester,
+      _readerApp(document: document, controller: controller, changes: changes),
+    );
+
+    await tester.tapOnText(find.textRange.ofSubstring('note'));
+    await _pumpFrames(tester, 3);
+
+    expect(tester.takeException(), isNull);
+    expect(changes, [0, 1]);
+    expect(controller.currentChapter, 1);
+  });
 }
 
 Widget _readerApp({
@@ -167,7 +190,8 @@ class _FakeDocument extends EpubDocument {
               index: index,
               href: 'text/ch${index + 1}.xhtml',
               relPath: 'text/ch${index + 1}.xhtml',
-              path: 'text/ch${index + 1}.xhtml',
+              // [EpubChapter.path] is the absolute path on disk.
+              path: '/book/text/ch${index + 1}.xhtml',
               title: 'Chapter ${index + 1}',
               byteSize: bodies[index].length,
               mediaType: 'application/xhtml+xml',

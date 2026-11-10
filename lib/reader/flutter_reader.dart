@@ -8,6 +8,7 @@ import 'package:path/path.dart' as p;
 
 import '../epub/chapter_html.dart';
 import '../epub/epub.dart';
+import '../epub/href_resolver.dart';
 import '../models/app_settings.dart';
 import '../utils/theme_utils.dart';
 import 'reader_content_controller.dart';
@@ -455,16 +456,32 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
             onLinkTap: (url, attributes, element) {
               if (url == null) return;
               final uri = Uri.tryParse(url);
-              if (uri == null) return;
-              if (uri.scheme == 'http' || uri.scheme == 'https') {
+              if (uri != null &&
+                  (uri.scheme == 'http' || uri.scheme == 'https')) {
                 widget.callbacks.onError?.call(
                   'External links are not opened by Folio.',
                 );
                 return;
               }
-              if (uri.scheme != 'file') return;
+              if (url.startsWith('#')) {
+                final id = Uri.decodeComponent(url.substring(1));
+                _pushHistory();
+                _jumpToAnchor(id);
+                _report(force: true);
+                return;
+              }
+              // `Uri.toFilePath()` throws when the URI still carries a
+              // fragment, so split the link the same way the WebView reader
+              // does.
+              final link = parseFileLink(url);
+              if (link == null) {
+                widget.callbacks.onError?.call(
+                  'This link is not opened by Folio.',
+                );
+                return;
+              }
               final chapter = widget.document.allDocuments
-                  .where((c) => p.equals(c.path, uri.toFilePath()))
+                  .where((c) => p.equals(c.path, link.path))
                   .firstOrNull;
               if (chapter == null) {
                 widget.callbacks.onError?.call(
@@ -473,10 +490,7 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
                 return;
               }
               _pushHistory();
-              _load(
-                chapter.index,
-                element: uri.fragment.isEmpty ? null : uri.fragment,
-              );
+              _load(chapter.index, element: link.fragment);
             },
             extensions: [
               TagExtension(
