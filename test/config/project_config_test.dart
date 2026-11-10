@@ -40,4 +40,10 @@ void main() {
     expect(gradle, contains('keystorePropertiesFile.exists()'));
     expect(gradle, contains('signingConfigs.getByName("debug")'));
   });
+
+  test('the cover reader streams the archive', () {
+    final source = File('lib/epub/epub_cover.dart').readAsStringSync();
+    expect(source, contains('InputFileStream'));
+    expect(source, isNot(contains('readAsBytes()')));
+  });
 }

@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
@@ -30,13 +29,30 @@ class EpubCover {
 /// Returns null for a missing, damaged or cover-less book instead of throwing,
 /// because a library card can always fall back to its placeholder.
 Future<EpubCover?> readEpubCover(String filePath) async {
-  final Archive archive;
+  final InputFileStream input;
   try {
-    archive = ZipDecoder().decodeBytes(await File(filePath).readAsBytes());
+    input = InputFileStream(filePath);
   } catch (_) {
+    // A missing or unreadable file opens no stream to close.
     return null;
   }
 
+  final Archive archive;
+  try {
+    archive = ZipDecoder().decodeStream(input);
+  } catch (_) {
+    await input.close();
+    return null;
+  }
+
+  try {
+    return _readCoverFromArchive(archive, filePath);
+  } finally {
+    await input.close();
+  }
+}
+
+EpubCover? _readCoverFromArchive(Archive archive, String filePath) {
   final entries = <String, ArchiveFile>{};
   for (final file in archive.files) {
     if (!file.isFile) continue;

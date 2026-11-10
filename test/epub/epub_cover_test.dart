@@ -124,4 +124,19 @@ void main() {
     await file.writeAsBytes([1, 2, 3, 4]);
     expect(await readEpubCover(file.path), isNull);
   });
+
+  test('returns null for a missing book', () async {
+    expect(await readEpubCover(p.join(tmp.path, 'missing.epub')), isNull);
+  });
+
+  test('reads a cover through a streamed archive', () async {
+    final file = await EpubFixture.write(tmp, {
+      ...epub3Entries(),
+      'OEBPS/images/cover.png': <int>[1, 2, 3, 4],
+    });
+
+    final cover = await readEpubCover(file.path);
+    expect(cover, isNotNull);
+    expect(cover!.bytes, [1, 2, 3, 4]);
+  });
 }
