@@ -83,9 +83,10 @@ ChapterContent rewriteChapterHtml(
       // Data images are safe and used by many books; data links are not.
       return allowData ? value : null;
     }
-    if (isLink && value.startsWith('#')) {
-      // A same-document footnote link must stay a fragment. Sending it to Dart
-      // reloaded and re-paginated the whole chapter for every footnote.
+    if (value.startsWith('#')) {
+      // Same-document references must stay fragments for every element:
+      // SVG `<use href="#icon">`, `<textPath href="#p">` and footnotes alike.
+      // Turning them into `file://...#id` made the SVG stop rendering.
       return value;
     }
 
@@ -120,7 +121,7 @@ ChapterContent rewriteChapterHtml(
     final value = element.attributes['srcset'];
     if (value == null) return;
     final kept = <String>[];
-    for (final candidate in value.split(',')) {
+    for (final candidate in splitSrcsetCandidates(value)) {
       final parts = candidate.trim().split(RegExp(r'\s+'));
       if (parts.isEmpty || parts.first.isEmpty) continue;
       final rewritten = rewrite(parts.first, allowData: true);
@@ -301,6 +302,46 @@ ChapterContent rewriteChapterHtml(
   );
 }
 
+/// Splits a `srcset` attribute into candidates.
+///
+/// A comma inside the URL (every `data:` URI) is not a separator, so the URL
+/// token is read until whitespace and only the descriptor that follows is
+/// terminated by a comma.
+List<String> splitSrcsetCandidates(String value) {
+  final candidates = <String>[];
+  var index = 0;
+  final length = value.length;
+  while (index < length) {
+    while (index < length &&
+        (value[index] == ',' || value[index].trim().isEmpty)) {
+      index++;
+    }
+    if (index >= length) break;
+    final urlStart = index;
+    while (index < length && value[index].trim().isNotEmpty) {
+      index++;
+    }
+    final url = value.substring(urlStart, index);
+    final descriptorStart = index;
+    var depth = 0;
+    while (index < length) {
+      final char = value[index];
+      if (char == '(') {
+        depth++;
+      } else if (char == ')' && depth > 0) {
+        depth--;
+      } else if (char == ',' && depth == 0) {
+        break;
+      }
+      index++;
+    }
+    final descriptor = value.substring(descriptorStart, index).trim();
+    candidates.add(descriptor.isEmpty ? url : '$url $descriptor');
+    if (index < length) index++;
+  }
+  return candidates;
+}
+
 /// HTML void elements. The HTML5 parser ignores the self-closing flag for
 /// every other element, so `<script src="x.js"/>` starts raw-text mode and
 /// swallows the rest of the chapter. Expanding all non-void tags fixes that;
@@ -386,7 +427,10 @@ String _rewriteCssUrls(
       missing.add(resolved.normalizedPath ?? raw);
       return 'url("")';
     }
-    final uri = resolver.fileUri(p.join(bookRoot, resolved.path!));
+    var uri = resolver.fileUri(p.join(bookRoot, resolved.path!));
+    if (resolved.fragment != null && resolved.fragment!.isNotEmpty) {
+      uri = '$uri#${Uri.encodeComponent(resolved.fragment!)}';
+    }
     return 'url("$uri")';
   });
 }

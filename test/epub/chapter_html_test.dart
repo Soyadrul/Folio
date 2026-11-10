@@ -11,6 +11,7 @@ void main() {
     'OEBPS/text/ch2.xhtml',
     'OEBPS/images/pic.jpg',
     'OEBPS/images/other.png',
+    'OEBPS/images/sprite.svg',
     'OEBPS/style/book.css',
   ]);
   const root = '/cache/book';
@@ -235,6 +236,51 @@ void main() {
       expect(c.bodyHtml, contains('<br>'));
       expect(c.bodyHtml, isNot(contains('<br></br>')));
       expect(c.bodyHtml, contains('file:///cache/book/OEBPS/images/pic.jpg'));
+    });
+
+    test('keeps a bare fragment on SVG elements', () {
+      final c = rewrite(
+        '<svg><defs><path id="p"/></defs><use href="#p"/></svg>'
+        '<svg><textPath href="#t">x</textPath></svg>',
+      );
+      expect(c.bodyHtml, contains('href="#p"'));
+      expect(c.bodyHtml, contains('href="#t"'));
+      expect(
+        c.bodyHtml,
+        isNot(contains('file:///cache/book/OEBPS/text/ch1.xhtml#p')),
+      );
+    });
+
+    test('keeps the fragment of a CSS url()', () {
+      final c = rewrite(
+        '<p style="fill: url(../images/sprite.svg#icon)">x</p>',
+      );
+      expect(
+        c.bodyHtml,
+        contains(
+          'url(&quot;file:///cache/book/OEBPS/images/sprite.svg#icon&quot;)',
+        ),
+      );
+    });
+
+    test('srcset keeps data URIs and commas inside them', () {
+      final c = rewrite(
+        '<img srcset="data:image/png;base64,AAA 1x, ../images/pic.jpg 2x"/>',
+      );
+      expect(c.bodyHtml, contains('data:image/png;base64,AAA 1x'));
+      expect(
+        c.bodyHtml,
+        contains('file:///cache/book/OEBPS/images/pic.jpg 2x'),
+      );
+    });
+  });
+
+  group('splitSrcsetCandidates', () {
+    test('does not split a data URI at its comma', () {
+      expect(splitSrcsetCandidates('data:image/png;base64,AAA 1x, b.png 2x'), [
+        'data:image/png;base64,AAA 1x',
+        'b.png 2x',
+      ]);
     });
   });
 
