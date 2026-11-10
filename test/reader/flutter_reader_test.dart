@@ -177,6 +177,36 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(scrollable.position.pixels, 0);
   });
+
+  testWidgets('a settings slider change updates the Linux scroll speed', (
+    tester,
+  ) async {
+    final document = _FakeDocument([_longBody()]);
+    final controller = ReaderContentController();
+
+    await _pumpReader(
+      tester,
+      _readerApp(
+        document: document,
+        controller: controller,
+        changes: [],
+        settings: const AppSettings(autoScrollSpeed: 40),
+      ),
+    );
+    final state = tester.state<FlutterReaderState>(find.byType(FlutterReader));
+    expect(state.autoScrollSpeed, 40);
+
+    await tester.pumpWidget(
+      _readerApp(
+        document: document,
+        controller: controller,
+        changes: [],
+        settings: const AppSettings(autoScrollSpeed: 120),
+      ),
+    );
+
+    expect(state.autoScrollSpeed, 120);
+  });
 }
 
 Widget _readerApp({
@@ -184,6 +214,7 @@ Widget _readerApp({
   required ReaderContentController controller,
   required List<int> changes,
   int initialChapter = 0,
+  AppSettings settings = const AppSettings(),
 }) {
   return MaterialApp(
     home: Scaffold(
@@ -193,7 +224,7 @@ Widget _readerApp({
           height: 600,
           child: FlutterReader(
             document: document,
-            settings: const AppSettings(),
+            settings: settings,
             callbacks: ReaderCallbacks(onChapterChanged: changes.add),
             controller: controller,
             initialChapter: initialChapter,

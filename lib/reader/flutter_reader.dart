@@ -87,6 +87,13 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
   @override
   void didUpdateWidget(covariant FlutterReader oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.settings.autoScrollSpeed != widget.settings.autoScrollSpeed) {
+      // The Settings screen changes the speed while the reader stays mounted.
+      _autoSpeed = widget.settings.autoScrollSpeed.round().clamp(5, 300);
+      _autoPosition = _scroll.hasClients
+          ? _scroll.position.pixels
+          : _autoPosition;
+    }
     final changed =
         oldWidget.settings.fontSize != widget.settings.fontSize ||
         oldWidget.settings.lineHeight != widget.settings.lineHeight ||
@@ -433,6 +440,8 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
 
   @override
   bool get autoScrollRunning => _autoRunning;
+
+  int get autoScrollSpeed => _autoSpeed;
 
   @override
   int get currentChapter => _chapterIndex;
