@@ -552,5 +552,37 @@ void main() {
       expect(prepared.bodyHtml, contains('<p>x</p>'));
       expect(prepared.webStyleHtml, isEmpty);
     });
+
+    test('a linked stylesheet cannot close the style element', () async {
+      final css = File(p.join(tmp.path, 'evil.css'));
+      await css.writeAsString('p{color:red} </style><b id="pwn">x</b>');
+
+      final content = ChapterContent(
+        bodyHtml: '<p>x</p>',
+        headHtml: '<link rel="stylesheet" href="${Uri.file(css.path)}">',
+        missingResources: [],
+      );
+      final prepared = await prepareChapterStyles(
+        content,
+        chapterIndex: 0,
+        chapterPath: 'ch.xhtml',
+        bookRoot: tmp.path,
+        resolver: HrefResolver(['evil.css']),
+      );
+
+      expect(prepared.webStyleHtml.toLowerCase(), isNot(contains('</style><')));
+      // The payload survives as inert CSS text inside the style element. The
+      // only unescaped closing tag left is the wrapper's own, so the `<b>`
+      // never becomes a DOM node.
+      expect(prepared.webStyleHtml, contains(r'<\/style><b id="pwn">'));
+      expect(
+        RegExp('</style').allMatches(prepared.webStyleHtml.toLowerCase()),
+        hasLength(1),
+      );
+      expect(
+        prepared.bookStyleHtml.toLowerCase(),
+        isNot(contains('</style><')),
+      );
+    });
   });
 }

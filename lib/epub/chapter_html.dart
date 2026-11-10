@@ -523,6 +523,13 @@ String _stripAllImports(String css) {
   return css.replaceAll(pattern, '');
 }
 
+/// A linked CSS file is untrusted input. `</style` inside it would end the
+/// wrapper element and let the file inject markup into the reader shell, so
+/// the sequence is escaped before it is embedded.
+String _neutralizeStyleClose(String css) {
+  return css.replaceAll(RegExp(r'</style', caseSensitive: false), r'<\/style');
+}
+
 /// Inlines linked stylesheets and scopes the whole book CSS to one chapter.
 ///
 /// EPUB stylesheets routinely style `body`/`html` and use generic selectors
@@ -541,7 +548,9 @@ Future<ChapterContent> prepareChapterStyles(
   final head = html_parser.parseFragment(content.headHtml);
 
   void addCss(String css) {
-    final cleaned = _stripAllImports(css.replaceFirst('\uFEFF', ''));
+    final cleaned = _neutralizeStyleClose(
+      _stripAllImports(css.replaceFirst('\uFEFF', '')),
+    );
     if (cleaned.trim().isEmpty) return;
     rawCss.add(cleaned);
     scopedCss.add(scopeBookCss(cleaned, scope));
