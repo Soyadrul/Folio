@@ -143,18 +143,23 @@ ChapterContent rewriteChapterHtml(
     'iframe',
     'frame',
     'frameset',
-    'object',
     'embed',
-    'applet',
     'meta',
     'base',
-    'form',
   };
   const blockedAttributes = {'srcdoc', 'formaction', 'ping'};
 
   final elements = document.querySelectorAll('*');
   for (final element in elements) {
     final tag = element.localName?.toLowerCase() ?? '';
+
+    // A form or object wrapper often carries real prose in converted books.
+    // Strip the element but keep its children; its dangerous attributes are
+    // removed by the attribute loop below.
+    if (tag == 'form' || tag == 'object' || tag == 'applet') {
+      _unwrap(element);
+      continue;
+    }
 
     if (blockedTags.contains(tag)) {
       element.remove();
@@ -289,6 +294,29 @@ ChapterContent rewriteChapterHtml(
     }
   }
 
+  // A <style> or stylesheet <link> inside <body> would stay in `bodyHtml`
+  // unscoped, leaking chapter CSS into the reader chrome and every other
+  // chapter. Move them into the head collection, which is scoped later by
+  // `prepareChapterStyles`.
+  final bodyElement = document.body;
+  if (bodyElement != null) {
+    for (final element
+        in bodyElement.querySelectorAll('style, link').toList()) {
+      final tag = element.localName?.toLowerCase() ?? '';
+      if (tag == 'style') {
+        headParts.add(element.outerHtml);
+        styleParts.add(element.outerHtml);
+        element.remove();
+        continue;
+      }
+      if (tag != 'link') continue;
+      final rel = (element.attributes['rel'] ?? '').toLowerCase();
+      if (!rel.contains('stylesheet')) continue;
+      headParts.add(element.outerHtml);
+      element.remove();
+    }
+  }
+
   final language = _chapterLanguage(document, body);
 
   return ChapterContent(
@@ -395,6 +423,23 @@ String _expandSelfClosingTags(String html) {
     if (_voidHtmlTags.contains(local)) return match.group(0)!;
     return '<$name${match.group(2)}></$name>';
   });
+}
+
+/// Replaces [element] by its children, keeping the text a book wrapped in a
+/// `<form>` or `<object>` fallback.
+void _unwrap(Element element) {
+  final parent = element.parent;
+  if (parent == null) {
+    element.remove();
+    return;
+  }
+  final index = parent.nodes.indexOf(element);
+  final children = element.nodes.toList();
+  for (final child in children) {
+    child.remove();
+  }
+  parent.nodes.insertAll(index < 0 ? parent.nodes.length : index, children);
+  element.remove();
 }
 
 String _attributeName(Object key) {

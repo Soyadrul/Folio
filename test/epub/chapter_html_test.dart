@@ -281,6 +281,35 @@ void main() {
       expect(c.bodyHtml, contains('file:///cache/book/OEBPS/images/pic.jpg'));
       expect(c.bodyHtml, contains('file:///cache/book/OEBPS/images/other.png'));
     });
+
+    test('a style element inside the body is scoped instead of leaking', () {
+      final c = rewrite(
+        '<html><body><style>p{color:red}</style><p>Hi</p></body></html>',
+      );
+      expect(c.bodyHtml, isNot(contains('<style>')));
+      expect(c.bookStyleHtml, contains('p{color:red}'));
+      expect(c.headHtml, contains('p{color:red}'));
+    });
+
+    test('a stylesheet link inside the body is moved to the head', () {
+      final c = rewrite(
+        '<html><body><link rel="stylesheet" href="../style/book.css"/>'
+        '<p>Hi</p></body></html>',
+      );
+      expect(c.bodyHtml, isNot(contains('<link')));
+      expect(c.headHtml, contains('style/book.css'));
+    });
+
+    test('form and object wrappers are removed but their text survives', () {
+      final c = rewrite(
+        '<html><body><form action="x"><p>Visible</p></form>'
+        '<object data="x"><p>Fallback</p></object></body></html>',
+      );
+      expect(c.bodyHtml, contains('Visible'));
+      expect(c.bodyHtml, contains('Fallback'));
+      expect(c.bodyHtml, isNot(contains('<form')));
+      expect(c.bodyHtml, isNot(contains('<object')));
+    });
   });
 
   group('splitSrcsetCandidates', () {
