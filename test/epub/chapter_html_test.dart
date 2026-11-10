@@ -273,12 +273,38 @@ void main() {
         contains('file:///cache/book/OEBPS/images/pic.jpg 2x'),
       );
     });
+
+    test('srcset keeps descriptorless candidates after a comma', () {
+      final c = rewrite(
+        '<img srcset="../images/pic.jpg, ../images/other.png"/>',
+      );
+      expect(c.bodyHtml, contains('file:///cache/book/OEBPS/images/pic.jpg'));
+      expect(c.bodyHtml, contains('file:///cache/book/OEBPS/images/other.png'));
+    });
   });
 
   group('splitSrcsetCandidates', () {
     test('does not split a data URI at its comma', () {
       expect(splitSrcsetCandidates('data:image/png;base64,AAA 1x, b.png 2x'), [
         'data:image/png;base64,AAA 1x',
+        'b.png 2x',
+      ]);
+    });
+
+    test('splits descriptorless candidates', () {
+      expect(splitSrcsetCandidates('a.png, b.png'), ['a.png', 'b.png']);
+    });
+
+    test('splits candidates with descriptors', () {
+      expect(splitSrcsetCandidates('a.png 1x, b.png 2x'), [
+        'a.png 1x',
+        'b.png 2x',
+      ]);
+    });
+
+    test('does not split a comma inside descriptor parentheses', () {
+      expect(splitSrcsetCandidates('a.png (max-width: 600px), b.png 2x'), [
+        'a.png (max-width: 600px)',
         'b.png 2x',
       ]);
     });

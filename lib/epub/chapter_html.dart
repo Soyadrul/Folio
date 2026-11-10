@@ -305,23 +305,41 @@ ChapterContent rewriteChapterHtml(
 /// Splits a `srcset` attribute into candidates.
 ///
 /// A comma inside the URL (every `data:` URI) is not a separator, so the URL
-/// token is read until whitespace and only the descriptor that follows is
-/// terminated by a comma.
+/// token is read until whitespace. One or more trailing commas mark a
+/// descriptorless candidate (`a.png, b.png`); otherwise only the descriptor
+/// that follows is terminated by a comma outside parentheses.
 List<String> splitSrcsetCandidates(String value) {
   final candidates = <String>[];
   var index = 0;
   final length = value.length;
   while (index < length) {
+    // Separators between candidates are whitespace and commas.
     while (index < length &&
         (value[index] == ',' || value[index].trim().isEmpty)) {
       index++;
     }
     if (index >= length) break;
+
     final urlStart = index;
     while (index < length && value[index].trim().isNotEmpty) {
       index++;
     }
-    final url = value.substring(urlStart, index);
+    var url = value.substring(urlStart, index);
+    var hasDescriptor = true;
+    while (url.endsWith(',')) {
+      url = url.substring(0, url.length - 1);
+      hasDescriptor = false;
+    }
+    if (url.isEmpty) continue;
+    if (!hasDescriptor) {
+      candidates.add(url);
+      continue;
+    }
+
+    // A descriptor runs to the next comma outside parentheses.
+    while (index < length && value[index].trim().isEmpty) {
+      index++;
+    }
     final descriptorStart = index;
     var depth = 0;
     while (index < length) {
@@ -337,7 +355,7 @@ List<String> splitSrcsetCandidates(String value) {
     }
     final descriptor = value.substring(descriptorStart, index).trim();
     candidates.add(descriptor.isEmpty ? url : '$url $descriptor');
-    if (index < length) index++;
+    if (index < length) index++; // Consume the comma.
   }
   return candidates;
 }
