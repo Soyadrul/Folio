@@ -917,3 +917,54 @@ test('progress is posted again once a chapter is installed', async () => {
   assert.ok(progress.length > 0);
   assert.equal(progress[progress.length - 1].chapterIndex, 0);
 });
+
+test('overlapping chapter transfers never corrupt each other', async () => {
+  const { folio, document, content } = loadReader();
+
+  folio.startChapter({ index: 20, transferId: 1 });
+  folio.appendChapterHtml('<p id="a">CHAPTER-20-part-1</p>', 1);
+
+  // A stale append for chapter 6 arrives while chapter 20 is still streaming.
+  folio.startChapter({
+    index: 6,
+    target: 'append',
+    transferId: 2,
+    hasNext: true,
+  });
+  folio.appendChapterHtml('<p>CHAPTER-6-body</p>', 2);
+
+  folio.appendChapterHtml('<p id="b">CHAPTER-20-part-2</p>', 1);
+  folio.endChapter(1);
+  folio.endChapter(2);
+
+  const sections = document.querySelectorAll('.folio-chapter');
+  const twenty = sections.find(
+    (section) => section.getAttribute('data-folio-index') === '20'
+  );
+  const six = sections.find(
+    (section) => section.getAttribute('data-folio-index') === '6'
+  );
+
+  assert.ok(twenty, 'chapter 20 must exist');
+  assert.equal(
+    twenty.innerHTML,
+    '<p id="a">CHAPTER-20-part-1</p><p id="b">CHAPTER-20-part-2</p>'
+  );
+  assert.equal(six, undefined, 'a non-adjacent append must be rejected');
+  assert.equal(content.children.length, 1);
+});
+
+test('a non-adjacent append is rejected even without transfer ids', () => {
+  const { folio, document } = loadReader();
+
+  folio.startChapter({ index: 4 });
+  folio.endChapter();
+  folio.startChapter({ index: 9, target: 'append' });
+  folio.appendChapterHtml('<p>nine</p>');
+  folio.endChapter();
+
+  const indexes = document
+    .querySelectorAll('.folio-chapter')
+    .map((section) => section.getAttribute('data-folio-index'));
+  assert.deepEqual(indexes, ['4']);
+});

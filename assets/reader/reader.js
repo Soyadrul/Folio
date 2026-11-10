@@ -597,8 +597,11 @@
 
   // A chapter arrives in three steps (`startChapter`, one or more
   // `appendChapterHtml` calls, `endChapter`) so a very large chapter never has
-  // to cross the JavaScript bridge as one huge string.
+  // to cross the JavaScript bridge as one huge string. `transferId` lets a
+  // late chunk from an older transfer be dropped instead of being appended to
+  // the newest one.
   const chapterTransfer = {
+    id: 0,
     target: null,
     payload: null,
     html: '',
@@ -620,6 +623,14 @@
       payload.target === 'append' || payload.target === 'prepend'
         ? payload.target
         : 'replace';
+
+    // Append/prepend may only extend the range that is already on the page.
+    // A stale `needChapter` from the previous scroll position must not insert
+    // a chapter that is not adjacent to the newly loaded one.
+    if (target === 'append' && payload.index !== state.loadedEnd + 1) return;
+    if (target === 'prepend' && payload.index !== state.loadedStart - 1) return;
+
+    chapterTransfer.id = payload.transferId == null ? 0 : Number(payload.transferId);
     chapterTransfer.target = target;
     chapterTransfer.payload = payload;
     chapterTransfer.html = '';
@@ -653,16 +664,26 @@
     chapterTransfer.element = makeEmptySection(payload);
   }
 
-  function appendChapterHtml(chunk) {
+  function appendChapterHtml(chunk, transferId) {
     if (!chapterTransfer.target) return;
+    if (
+      transferId != null &&
+      Number(transferId) !== chapterTransfer.id
+    ) {
+      return;
+    }
     chapterTransfer.html += chunk;
   }
 
-  function endChapter() {
+  function endChapter(transferId) {
+    if (transferId != null && Number(transferId) !== chapterTransfer.id) {
+      return;
+    }
     const target = chapterTransfer.target;
     const payload = chapterTransfer.payload;
     const el = chapterTransfer.element;
     const html = chapterTransfer.html;
+    chapterTransfer.id = 0;
     chapterTransfer.target = null;
     chapterTransfer.payload = null;
     chapterTransfer.html = '';
@@ -727,20 +748,20 @@
 
   function setChapter(payload) {
     startChapter(payload);
-    appendChapterHtml(payload.html || '');
-    endChapter();
+    appendChapterHtml(payload.html || '', payload.transferId);
+    endChapter(payload.transferId);
   }
 
   function appendChapter(payload) {
     startChapter(Object.assign({}, payload, { target: 'append' }));
-    appendChapterHtml(payload.html || '');
-    endChapter();
+    appendChapterHtml(payload.html || '', payload.transferId);
+    endChapter(payload.transferId);
   }
 
   function prependChapter(payload) {
     startChapter(Object.assign({}, payload, { target: 'prepend' }));
-    appendChapterHtml(payload.html || '');
-    endChapter();
+    appendChapterHtml(payload.html || '', payload.transferId);
+    endChapter(payload.transferId);
   }
 
   function applySettings(settings) {
