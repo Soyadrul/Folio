@@ -378,6 +378,15 @@ jobs:
 
             # Check if release signing secrets are configured in GitHub
             if [ -n "$MISSING_SECRETS" ]; then
+              # A published release is described as production-signed. Never
+              # let a debug-signed APK reach the release assets.
+              if [[ -n "$RELEASE_VERSION" ]] && [[ "$RELEASE_VERSION" != "none" ]]; then
+                echo "❌ ERROR: Refusing to publish an APK signed with the debug key."
+                echo "   Missing secret(s):$MISSING_SECRETS"
+                echo "   Add the missing repository secrets, or run a build-only workflow."
+                exit 1
+              fi
+
               # No secrets: fall back to the debug key so forks and build-only
               # runs still produce an installable APK. Never publish these.
               echo "⚠️  Release signing is not configured; using the debug key."

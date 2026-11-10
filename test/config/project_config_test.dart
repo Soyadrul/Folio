@@ -55,4 +55,15 @@ void main() {
     expect(source, isNot(contains('System.currentTimeMillis()}-\$fileName')));
     expect(source, contains('.part'));
   });
+
+  test('publishing fails when signing secrets are missing', () {
+    final workflow = File(
+      '.github/workflows/build-release.yml',
+    ).readAsStringSync();
+    expect(
+      workflow,
+      contains('Refusing to publish an APK signed with the debug key'),
+    );
+    expect(workflow, contains('exit 1'));
+  });
 }

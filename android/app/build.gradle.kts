@@ -1,7 +1,5 @@
 import java.util.Properties
-import org.jetbrains.kotlin.gradle.dsl.JvmTarget // Use this for Kotlin 1.9+
-// OR if you are on an older version:
-// import org.jetbrains.kotlin.gradle.dsl.KotlinJvmTarget
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     id("com.android.application")
