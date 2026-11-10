@@ -274,6 +274,10 @@
   }
 
   function postProgress() {
+    // `computeLayout()` runs as soon as the shell initialises, before Dart has
+    // sent the first chapter. Reporting `chapterIndex: -1` made the host save
+    // "-1" as the resume position, which reopened the book at chapter 0.
+    if (state.index < 0) return;
     state.lastReport = Date.now();
     state.progressTimer = 0;
     post('progress', {

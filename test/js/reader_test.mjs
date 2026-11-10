@@ -892,3 +892,28 @@ test('CSS hyphenation follows both the switch and justified text', async () => {
     'left-aligned text is never hyphenated'
   );
 });
+
+test('no progress is posted before the first chapter is installed', async () => {
+  const { folio, posts } = loadReader();
+
+  folio.init({ mode: 'scroll' });
+  await wait(80);
+
+  assert.deepEqual(
+    posts.filter((post) => post.type === 'progress'),
+    []
+  );
+});
+
+test('progress is posted again once a chapter is installed', async () => {
+  const { folio, posts } = loadReader();
+
+  folio.init({ mode: 'scroll' });
+  await wait(40);
+  folio.setChapter({ index: 0, html: '<p>Hello</p>', hasNext: false });
+  await wait(40);
+
+  const progress = posts.filter((post) => post.type === 'progress');
+  assert.ok(progress.length > 0);
+  assert.equal(progress[progress.length - 1].chapterIndex, 0);
+});
