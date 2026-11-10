@@ -217,6 +217,25 @@ void main() {
       expect(c.bodyHtml, contains('data-folio-missing-image'));
       expect(c.bodyHtml, isNot(contains('gone.png')));
     });
+
+    for (final tag in ['script', 'iframe', 'object', 'font', 'applet']) {
+      test('a self-closing <$tag/> keeps the rest of the chapter', () {
+        final c = rewrite(
+          '<html><body><$tag src="a.js"/><p>Hello</p></body></html>',
+        );
+        expect(c.bodyHtml, contains('Hello'), reason: tag);
+        expect(c.bodyHtml, isNot(contains('</html>')), reason: tag);
+      });
+    }
+
+    test('HTML void elements stay void when self-closed', () {
+      final c = rewrite(
+        '<html><body><p>a<br/>b<img src="../images/pic.jpg"/></p></body></html>',
+      );
+      expect(c.bodyHtml, contains('<br>'));
+      expect(c.bodyHtml, isNot(contains('<br></br>')));
+      expect(c.bodyHtml, contains('file:///cache/book/OEBPS/images/pic.jpg'));
+    });
   });
 
   group('XHTML self-closing tags', () {
