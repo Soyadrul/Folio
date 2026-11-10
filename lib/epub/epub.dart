@@ -31,6 +31,36 @@ Set<String> epubManifestProperties(String raw) {
 /// Whether [path] names an image the reader can display.
 bool isEpubImagePath(String path) => EpubLoader.isEpubImagePath(path);
 
+/// Chooses a chapter title from its markup.
+///
+/// `<title>` usually repeats the book title, so the first heading wins.
+/// The regex requires whitespace or `>` after `title`, which stops
+/// `<titlepage>` from matching.
+String chapterTitleFromHtml(String html, {String? bookTitle}) {
+  final heading = RegExp(
+    r'<h[12](?:\s[^>]*)?>(.*?)</h[12]>',
+    caseSensitive: false,
+    dotAll: true,
+  ).firstMatch(html)?.group(1);
+  if (heading != null && heading.trim().isNotEmpty) {
+    return _plainText(heading);
+  }
+  final title = RegExp(
+    r'<title(?:\s[^>]*)?>(.*?)</title>',
+    caseSensitive: false,
+    dotAll: true,
+  ).firstMatch(html)?.group(1);
+  if (title != null && title.trim().isNotEmpty) {
+    final plain = _plainText(title);
+    if (bookTitle == null || plain != bookTitle.trim()) return plain;
+  }
+  return '';
+}
+
+String _plainText(String html) => (html_parser.parseFragment(html).text ?? '')
+    .replaceAll(RegExp(r'\s+'), ' ')
+    .trim();
+
 /// A user-facing problem while opening an EPUB.
 class EpubException implements Exception {
   EpubException(this.message);
@@ -344,6 +374,9 @@ class EpubLoader {
     }
   }
 
+  static const _maxExtractEntries = 20000;
+  static const _maxExtractBytes = 2 * 1024 * 1024 * 1024;
+
   Future<void> _extract(File file, Directory target) async {
     final bytes = await _readEpubBytes(file);
     final Archive archive;
@@ -353,8 +386,20 @@ class EpubLoader {
       throw EpubException('This book is damaged or is not an EPUB: $e');
     }
 
+    var extracted = 0;
+    var entries = 0;
     for (final entry in archive.files) {
       if (!entry.isFile) continue;
+      entries++;
+      if (entries > _maxExtractEntries) {
+        throw EpubException(
+          'This book contains too many files to open safely.',
+        );
+      }
+      extracted += entry.size;
+      if (extracted > _maxExtractBytes) {
+        throw EpubException('This book is too large to extract safely.');
+      }
       final safe = _safeEntryPath(entry.name);
       if (safe == null) continue;
       final output = File(p.joinAll([target.path, ...safe.split('/')]));
@@ -606,7 +651,7 @@ class EpubLoader {
     Future<EpubChapter> withTitle(EpubChapter chapter) async {
       final tocTitle = tocTitles[chapter.index] ?? '';
       final titleFromChapter = tocTitle.isEmpty
-          ? await _chapterTitle(chapter.path)
+          ? await _chapterTitle(chapter.path, bookTitle: title)
           : tocTitle;
       final inReadingFlow = chapters.any((c) => c.index == chapter.index);
       final fallback = inReadingFlow
@@ -798,40 +843,23 @@ class EpubLoader {
     return decodeEpubText(await file.readAsBytes());
   }
 
-  Future<String> _chapterTitle(String path) async {
+  Future<String> _chapterTitle(String path, {String? bookTitle}) async {
     try {
       final file = File(path);
       final length = await file.length();
       final bytes = await file
           .openRead(0, length > 8192 ? 8192 : length)
           .fold<List<int>>(<int>[], (all, chunk) => all..addAll(chunk));
-      final raw = decodeEpubText(bytes);
-      final title = RegExp(
-        r'<title[^>]*>(.*?)</title>',
-        caseSensitive: false,
-        dotAll: true,
-      ).firstMatch(raw)?.group(1);
-      if (title != null && title.trim().isNotEmpty) {
-        return _plainText(title);
-      }
-      final heading = RegExp(
-        r'<h[12][^>]*>(.*?)</h[12]>',
-        caseSensitive: false,
-        dotAll: true,
-      ).firstMatch(raw)?.group(1);
-      if (heading != null && heading.trim().isNotEmpty) {
-        return _plainText(heading);
-      }
+      final title = chapterTitleFromHtml(
+        decodeEpubText(bytes),
+        bookTitle: bookTitle,
+      );
+      if (title.isNotEmpty) return title;
     } catch (_) {
       // Fall through to the generic title.
     }
     return '';
   }
-
-  static String _plainText(String html) =>
-      (html_parser.parseFragment(html).text ?? '')
-          .replaceAll(RegExp(r'\s+'), ' ')
-          .trim();
 
   Future<String?> _resolveCover({
     required XmlElement? metadata,

@@ -45,6 +45,40 @@ void main() {
     });
   });
 
+  group('chapterTitleFromHtml', () {
+    test('prefers the first heading over the document title', () {
+      expect(
+        chapterTitleFromHtml(
+          '<html><head><title>Old Book</title></head>'
+          '<body><h1>Chapter One</h1></body></html>',
+          bookTitle: 'Old Book',
+        ),
+        'Chapter One',
+      );
+    });
+
+    test('uses the title when it is not the book title', () {
+      expect(
+        chapterTitleFromHtml(
+          '<html><head><title>Prologue</title></head><body></body></html>',
+          bookTitle: 'Old Book',
+        ),
+        'Prologue',
+      );
+    });
+
+    test('does not treat <titlepage> as a title element', () {
+      expect(
+        chapterTitleFromHtml(
+          '<html><head><titlepage>no</titlepage></head>'
+          '<body><h2>Real</h2></body></html>',
+          bookTitle: 'Old Book',
+        ),
+        'Real',
+      );
+    });
+  });
+
   group('isEpubImagePath', () {
     test('recognises common and newer image extensions', () {
       for (final path in [

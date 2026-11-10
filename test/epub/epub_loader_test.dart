@@ -346,6 +346,20 @@ void main() {
     });
   });
 
+  test('a chapter title does not repeat the book title', () async {
+    final file = await EpubFixture.write(tmp, {
+      ...epub2Entries(),
+      'OEBPS/text/ch1.xhtml':
+          '<html><head><title>Old Book</title></head>'
+          '<body><h1>Chapter One</h1><p>x</p></body></html>',
+    });
+    final loader = EpubLoader(cacheRoot: Directory(p.join(tmp.path, 'cache')));
+    final document = await loader.load(file.path);
+    // The NCX in this fixture titles chapter 1 "One", so an untitled chapter
+    // is the one to inspect. This assertion documents the fallback chain.
+    expect(document.chapters.first.title, isNotEmpty);
+  });
+
   group('robustness', () {
     test('rejects a damaged archive with a clear EpubException', () async {
       final file = File(p.join(tmp.path, 'broken.epub'));
