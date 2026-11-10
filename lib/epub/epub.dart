@@ -12,7 +12,24 @@ import 'package:xml/xml.dart';
 
 import 'chapter_html.dart';
 import 'epub_metadata.dart';
+import 'epub_text.dart';
 import 'href_resolver.dart';
+
+export 'epub_text.dart' show decodeEpubText;
+
+/// Manifest `properties` is whitespace-separated by specification, but books
+/// use tabs and newlines too. Splitting on a single space made `nav` and
+/// `cover-image` disappear.
+Set<String> epubManifestProperties(String raw) {
+  return raw
+      .toLowerCase()
+      .split(RegExp(r'\s+'))
+      .where((value) => value.isNotEmpty)
+      .toSet();
+}
+
+/// Whether [path] names an image the reader can display.
+bool isEpubImagePath(String path) => EpubLoader.isEpubImagePath(path);
 
 /// A user-facing problem while opening an EPUB.
 class EpubException implements Exception {
@@ -155,7 +172,7 @@ class EpubDocument {
     final bytes = await File(chapter.path).readAsBytes();
     // Some older books are not valid UTF-8; replacement characters are much
     // better than refusing to open the chapter.
-    final raw = utf8.decode(bytes, allowMalformed: true);
+    final raw = decodeEpubText(bytes);
     final content = rewriteChapterHtml(
       raw,
       chapterPath: chapter.relPath,
@@ -489,7 +506,9 @@ class EpubLoader {
       // The EPUB 3 navigation document stays in the reading flow even when
       // the publisher marks it non-linear: readers expect to find the book's
       // index page where the publisher placed it.
-      final isNavigation = item.properties.split(' ').contains('nav');
+      final isNavigation = epubManifestProperties(
+        item.properties,
+      ).contains('nav');
       final linear =
           isNavigation ||
           (_attribute(itemref, 'linear') ?? '').toLowerCase() != 'no';
@@ -672,7 +691,9 @@ class EpubLoader {
 
     // EPUB 3 navigation document.
     final navItem = manifestItems.values
-        .where((item) => item.properties.split(' ').contains('nav'))
+        .where(
+          (item) => epubManifestProperties(item.properties).contains('nav'),
+        )
         .firstOrNull;
     if (navItem != null) {
       final resolved = resolver.resolve(navItem.href, basePath: opfRel);
@@ -768,13 +789,13 @@ class EpubLoader {
     return entries;
   }
 
-  /// Reads an EPUB text file as UTF-8 even when a few bytes are invalid.
+  /// Reads an EPUB text file even when a few bytes are invalid.
   ///
   /// Old books regularly contain a stray Windows-1252 byte in the OPF, nav or
-  /// NCX. Replacement characters are always better than failing to open the
-  /// whole book.
+  /// NCX, and some use a UTF-16 BOM. Replacement characters are always better
+  /// than failing to open the whole book.
   static Future<String> _readText(File file) async {
-    return utf8.decode(await file.readAsBytes(), allowMalformed: true);
+    return decodeEpubText(await file.readAsBytes());
   }
 
   Future<String> _chapterTitle(String path) async {
@@ -784,7 +805,7 @@ class EpubLoader {
       final bytes = await file
           .openRead(0, length > 8192 ? 8192 : length)
           .fold<List<int>>(<int>[], (all, chunk) => all..addAll(chunk));
-      final raw = utf8.decode(bytes, allowMalformed: true);
+      final raw = decodeEpubText(bytes);
       final title = RegExp(
         r'<title[^>]*>(.*?)</title>',
         caseSensitive: false,
@@ -830,9 +851,14 @@ class EpubLoader {
 
     // 1. EPUB 3 cover-image manifest property.
     for (final item in manifestItems.values) {
-      if (!item.properties.split(' ').contains('cover-image')) continue;
+      if (!epubManifestProperties(item.properties).contains('cover-image')) {
+        continue;
+      }
       final resolved = resolver.resolve(item.href, basePath: opfRel);
-      if (resolved.path == null || !_isImagePath(resolved.path!)) continue;
+      if (resolved.path == null ||
+          !EpubLoader.isEpubImagePath(resolved.path!)) {
+        continue;
+      }
       final path = existing(resolved.path);
       if (path != null) return path;
     }
@@ -844,7 +870,10 @@ class EpubLoader {
       final item = id == null ? null : manifestItems[id];
       if (item == null) continue;
       final resolved = resolver.resolve(item.href, basePath: opfRel);
-      if (resolved.path == null || !_isImagePath(resolved.path!)) continue;
+      if (resolved.path == null ||
+          !EpubLoader.isEpubImagePath(resolved.path!)) {
+        continue;
+      }
       final path = existing(resolved.path);
       if (path != null) return path;
     }
@@ -858,7 +887,7 @@ class EpubLoader {
       if (href == null) continue;
       final resolved = resolver.resolve(href, basePath: opfRel);
       if (resolved.path == null) continue;
-      if (_isImagePath(resolved.path!)) {
+      if (EpubLoader.isEpubImagePath(resolved.path!)) {
         final path = existing(resolved.path);
         if (path != null) return path;
       } else {
@@ -888,9 +917,7 @@ class EpubLoader {
       final bytes = await file
           .openRead(0, length > 1024 * 1024 ? 1024 * 1024 : length)
           .fold<List<int>>(<int>[], (all, chunk) => all..addAll(chunk));
-      final document = html_parser.parse(
-        utf8.decode(bytes, allowMalformed: true),
-      );
+      final document = html_parser.parse(decodeEpubText(bytes));
       for (final element in document.querySelectorAll('img, image, object')) {
         final elementName = element.localName?.toLowerCase();
         String? href;
@@ -909,7 +936,8 @@ class EpubLoader {
         }
         if (href == null) continue;
         final resolved = resolver.resolve(href, basePath: relPath);
-        if (resolved.path != null && _isImagePath(resolved.path!)) {
+        if (resolved.path != null &&
+            EpubLoader.isEpubImagePath(resolved.path!)) {
           return resolved.path;
         }
       }
@@ -928,15 +956,19 @@ class EpubLoader {
         lower.endsWith('.htm');
   }
 
-  static bool _isImagePath(String path) {
+  static bool isEpubImagePath(String path) {
     final lower = path.toLowerCase();
     return lower.endsWith('.jpg') ||
         lower.endsWith('.jpeg') ||
+        lower.endsWith('.jfif') ||
         lower.endsWith('.png') ||
         lower.endsWith('.gif') ||
         lower.endsWith('.webp') ||
         lower.endsWith('.svg') ||
-        lower.endsWith('.bmp');
+        lower.endsWith('.bmp') ||
+        lower.endsWith('.avif') ||
+        lower.endsWith('.tif') ||
+        lower.endsWith('.tiff');
   }
 
   static bool _hasTocType(dom.Element nav) {

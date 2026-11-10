@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -7,6 +6,7 @@ import 'package:html/parser.dart' as html_parser;
 import 'package:path/path.dart' as p;
 import 'package:xml/xml.dart';
 
+import 'epub_text.dart';
 import 'href_resolver.dart';
 
 /// A cover image read straight from the EPUB archive.
@@ -111,7 +111,7 @@ Future<EpubCover?> readEpubCover(String filePath) async {
 
     // 1. EPUB 3 cover-image manifest property.
     for (final item in manifestItems.values) {
-      if (!item.properties.split(RegExp(r'\s+')).contains('cover-image')) {
+      if (!_properties(item.properties).contains('cover-image')) {
         continue;
       }
       final path = resolveHref(item.href);
@@ -250,18 +250,30 @@ String? _rasterInsideSvg(
   return null;
 }
 
+Set<String> _properties(String raw) {
+  return raw
+      .toLowerCase()
+      .split(RegExp(r'\s+'))
+      .where((value) => value.isNotEmpty)
+      .toSet();
+}
+
 bool _isImagePath(String path) {
   final lower = path.toLowerCase();
   return lower.endsWith('.jpg') ||
       lower.endsWith('.jpeg') ||
+      lower.endsWith('.jfif') ||
       lower.endsWith('.png') ||
       lower.endsWith('.gif') ||
       lower.endsWith('.webp') ||
       lower.endsWith('.svg') ||
-      lower.endsWith('.bmp');
+      lower.endsWith('.bmp') ||
+      lower.endsWith('.avif') ||
+      lower.endsWith('.tif') ||
+      lower.endsWith('.tiff');
 }
 
-String _text(List<int> bytes) => utf8.decode(bytes, allowMalformed: true);
+String _text(List<int> bytes) => decodeEpubText(bytes);
 
 String? _safeEntryName(String rawName) {
   var name = rawName.replaceAll('\\', '/');

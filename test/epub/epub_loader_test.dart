@@ -278,6 +278,23 @@ void main() {
       expect(book.toc.map((t) => t.level), [0, 1]);
     });
 
+    test(
+      'manifest properties separated by tabs still find the cover and nav',
+      () async {
+        final opf = epub3Opf.replaceFirst(
+          'properties="nav"',
+          'properties="nav\tcover-image"',
+        );
+        final file = await EpubFixture.write(tmp, epub3Entries(opf: opf));
+        final loader = EpubLoader(
+          cacheRoot: Directory(p.join(tmp.path, 'cache')),
+        );
+        final document = await loader.load(file.path);
+        expect(document.coverImagePath, isNotNull);
+        expect(document.toc, isNotEmpty);
+      },
+    );
+
     test('supports URL-encoded manifest hrefs', () async {
       final opf = epub3Opf.replaceFirst(
         '<item id="cover" href="images/cover.png" media-type="image/png"',

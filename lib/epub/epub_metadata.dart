@@ -1,9 +1,8 @@
-import 'dart:convert';
-
 import 'package:archive/archive.dart';
 import 'package:path/path.dart' as p;
 import 'package:xml/xml.dart';
 
+import 'epub_text.dart';
 import 'href_resolver.dart';
 
 /// Minimal metadata read for the library grid.
@@ -85,7 +84,7 @@ EpubMetadata _readMetadata(Archive archive, String filePath) {
     throw const FormatException('META-INF/container.xml is missing');
   }
   final containerDoc = XmlDocument.parse(
-    utf8.decode(container.readBytes() ?? const [], allowMalformed: true),
+    decodeEpubText(container.readBytes() ?? const []),
   );
   final rootfile = containerDoc.descendants
       .whereType<XmlElement>()
@@ -108,7 +107,7 @@ EpubMetadata _readMetadata(Archive archive, String filePath) {
     throw const FormatException('The package document is missing');
   }
   final opf = XmlDocument.parse(
-    utf8.decode(opfEntry.readBytes() ?? const [], allowMalformed: true),
+    decodeEpubText(opfEntry.readBytes() ?? const []),
   );
   final package = _firstElement(opf, 'package');
   if (package == null) {
