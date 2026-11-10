@@ -190,7 +190,7 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
       return;
     }
     if (url.startsWith('#')) {
-      final id = Uri.decodeComponent(url.substring(1));
+      final id = decodeFragment(url.substring(1));
       _pushHistory();
       _jumpToAnchor(id);
       _report(force: true);

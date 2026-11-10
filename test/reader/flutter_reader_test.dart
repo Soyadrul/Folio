@@ -153,6 +153,30 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(scrollable.position.pixels, greaterThan(0));
   });
+
+  testWidgets('a malformed in-chapter fragment does not throw', (tester) async {
+    final document = _FakeDocument([
+      '<p><a href="#100%">broken</a></p>${_longBody()}',
+    ]);
+    final changes = <int>[];
+    final controller = ReaderContentController();
+
+    await _pumpReader(
+      tester,
+      _readerApp(document: document, controller: controller, changes: changes),
+    );
+    final scrollable = tester.state<ScrollableState>(
+      find.byType(Scrollable).first,
+    );
+    expect(scrollable.position.pixels, 0);
+
+    await tester.tapOnText(find.textRange.ofSubstring('broken'));
+    await _pumpFrames(tester, 3);
+
+    // Decoding falls back to the raw id, which matches nothing here.
+    expect(tester.takeException(), isNull);
+    expect(scrollable.position.pixels, 0);
+  });
 }
 
 Widget _readerApp({

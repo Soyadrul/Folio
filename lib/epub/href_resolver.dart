@@ -41,6 +41,21 @@ class LocalLink {
   final String? fragment;
 }
 
+/// Decodes a percent-encoded fragment, falling back to the original text when
+/// the encoding is malformed.
+///
+/// Redirect targets and hrefs come from untrusted book content, so a fragment
+/// like `#100%` must not throw while a link is being followed.
+String decodeFragment(String value) {
+  try {
+    return Uri.decodeComponent(value);
+  } on ArgumentError {
+    return value;
+  } on FormatException {
+    return value;
+  }
+}
+
 /// Splits a `file:` URI into a native path and a decoded anchor.
 ///
 /// Returns null for links that do not point at a local file. `Uri.toFilePath`
@@ -52,7 +67,7 @@ LocalLink? parseFileLink(String href) {
   try {
     final path = uri.replace(fragment: '').toFilePath();
     final raw = uri.hasFragment ? uri.fragment : '';
-    final fragment = raw.isEmpty ? null : Uri.decodeComponent(raw);
+    final fragment = raw.isEmpty ? null : decodeFragment(raw);
     return LocalLink(path: path, fragment: fragment);
   } on UnsupportedError {
     return null;
@@ -152,11 +167,5 @@ class HrefResolver {
   /// Converts an absolute native path to a `file://` URI usable by a WebView.
   String fileUri(String absolutePath) => Uri.file(absolutePath).toString();
 
-  static String _decode(String value) {
-    try {
-      return Uri.decodeComponent(value);
-    } catch (_) {
-      return value;
-    }
-  }
+  static String _decode(String value) => decodeFragment(value);
 }
