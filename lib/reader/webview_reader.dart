@@ -13,6 +13,7 @@ import '../epub/epub.dart';
 import '../epub/href_resolver.dart';
 import '../models/app_settings.dart';
 import '../utils/theme_utils.dart';
+import 'chapter_transfer_queue.dart';
 import 'reader_content_controller.dart';
 import 'reader_fonts.dart';
 import 'webview_security.dart';
@@ -146,6 +147,10 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
 
   final Map<int, ChapterContent> _chapterCache = {};
   static const _cacheLimit = 4;
+
+  /// Serialises chapter transfers: JavaScript has a single chapter buffer, so
+  /// two in-flight sends would interleave their chunks.
+  final ChapterTransferQueue _transfers = ChapterTransferQueue();
 
   @override
   void initState() {
@@ -425,7 +430,14 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
         progress: progress,
         element: element,
       );
-      await _sendChapter(payload: payload, html: content.bodyHtml);
+      final bodyHtml = content.bodyHtml;
+      await _transfers.enqueue(
+        (transferId) => _sendChapter(
+          payload: payload,
+          html: bodyHtml,
+          transferId: transferId,
+        ),
+      );
 
       // Warm the next chapter without blocking the current one.
       final next = widget.document.nextReadingIndex(index);
@@ -451,14 +463,17 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
   }
 
   /// Sends a chapter in small pieces so the JavaScript bridge never has to
-  /// carry a multi-megabyte script string.
+  /// carry a multi-megabyte script string. [transferId] tags every piece so
+  /// the shell can drop chunks that belong to an older transfer.
   Future<void> _sendChapter({
     required Map<String, dynamic> payload,
     required String html,
+    required int transferId,
   }) async {
     final controller = _controller;
     if (controller == null || !_shellReady) return;
     payload.remove('html');
+    payload['transferId'] = transferId;
     await controller.evaluateJavascript(
       source: 'folio.startChapter(${jsonEncode(payload)});',
     );
@@ -466,10 +481,13 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
       final end = (start + _maxScriptChunk).clamp(0, html.length);
       await controller.evaluateJavascript(
         source:
-            'folio.appendChapterHtml(${jsonEncode(html.substring(start, end))});',
+            'folio.appendChapterHtml(${jsonEncode(html.substring(start, end))}, '
+            '$transferId);',
       );
     }
-    await controller.evaluateJavascript(source: 'folio.endChapter();');
+    await controller.evaluateJavascript(
+      source: 'folio.endChapter($transferId);',
+    );
   }
 
   Future<void> _appendOrPrepend(int target, {required bool after}) async {
@@ -477,7 +495,13 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
     if (content == null || _controller == null) return;
     final payload = _payload(target, content)
       ..['target'] = after ? 'append' : 'prepend';
-    await _sendChapter(payload: payload, html: content.bodyHtml);
+    await _transfers.enqueue(
+      (transferId) => _sendChapter(
+        payload: payload,
+        html: content.bodyHtml,
+        transferId: transferId,
+      ),
+    );
   }
 
   Future<void> _handleLink(String href) async {
