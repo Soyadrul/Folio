@@ -42,8 +42,9 @@ String chapterTitleFromHtml(String html, {String? bookTitle}) {
     caseSensitive: false,
     dotAll: true,
   ).firstMatch(html)?.group(1);
-  if (heading != null && heading.trim().isNotEmpty) {
-    return _plainText(heading);
+  if (heading != null) {
+    final plain = _plainText(heading);
+    if (plain.isNotEmpty) return plain;
   }
   final title = RegExp(
     r'<title(?:\s[^>]*)?>(.*?)</title>',

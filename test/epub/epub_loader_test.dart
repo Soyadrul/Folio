@@ -346,18 +346,18 @@ void main() {
     });
   });
 
-  test('a chapter title does not repeat the book title', () async {
+  test('a chapter title prefers its heading over the book title', () async {
+    final entries = epub2Entries()..remove('OEBPS/toc.ncx');
     final file = await EpubFixture.write(tmp, {
-      ...epub2Entries(),
+      ...entries,
       'OEBPS/text/ch1.xhtml':
           '<html><head><title>Old Book</title></head>'
           '<body><h1>Chapter One</h1><p>x</p></body></html>',
     });
-    final loader = EpubLoader(cacheRoot: Directory(p.join(tmp.path, 'cache')));
-    final document = await loader.load(file.path);
-    // The NCX in this fixture titles chapter 1 "One", so an untitled chapter
-    // is the one to inspect. This assertion documents the fallback chain.
-    expect(document.chapters.first.title, isNotEmpty);
+    final document = await loader().load(file.path);
+    // Without an NCX entry the chapter falls back to its own markup; the
+    // document title repeats the book title, so the heading must win.
+    expect(document.chapters.first.title, 'Chapter One');
   });
 
   group('robustness', () {
@@ -365,6 +365,30 @@ void main() {
       final file = File(p.join(tmp.path, 'broken.epub'));
       await file.writeAsBytes([1, 2, 3, 4, 5]);
       expect(() => loader().load(file.path), throwsA(isA<EpubException>()));
+    });
+
+    test('rejects a book with too many files and cleans up', () async {
+      final entries = <String, Object>{
+        'META-INF/container.xml': containerXml,
+        'OEBPS/content.opf': epub2Opf,
+      };
+      for (var index = 0; index < 20001; index++) {
+        entries['OEBPS/junk/$index.txt'] = '';
+      }
+      final file = await EpubFixture.write(tmp, entries);
+
+      await expectLater(
+        loader().load(file.path),
+        throwsA(
+          isA<EpubException>().having(
+            (e) => e.message,
+            'message',
+            contains('too many files'),
+          ),
+        ),
+      );
+      expect(await cache.exists(), isTrue);
+      expect(await cache.list().toList(), isEmpty);
     });
 
     test('rejects a book without META-INF/container.xml', () async {

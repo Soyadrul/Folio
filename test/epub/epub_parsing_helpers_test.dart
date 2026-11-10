@@ -67,14 +67,54 @@ void main() {
       );
     });
 
+    test('returns nothing when the title is the book title', () {
+      expect(
+        chapterTitleFromHtml('<title>Old Book</title>', bookTitle: 'Old Book'),
+        '',
+      );
+    });
+
+    test('returns the title when there is no book title', () {
+      expect(chapterTitleFromHtml('<title>Prologue</title>'), 'Prologue');
+    });
+
     test('does not treat <titlepage> as a title element', () {
       expect(
         chapterTitleFromHtml(
           '<html><head><titlepage>no</titlepage></head>'
-          '<body><h2>Real</h2></body></html>',
+          '<body></body></html>',
           bookTitle: 'Old Book',
         ),
-        'Real',
+        '',
+      );
+    });
+
+    test('still reads a real title in the same shape', () {
+      expect(
+        chapterTitleFromHtml(
+          '<html><head><title>Prologue</title></head>'
+          '<body></body></html>',
+          bookTitle: 'Old Book',
+        ),
+        'Prologue',
+      );
+    });
+
+    test('falls through an empty heading to the title', () {
+      expect(
+        chapterTitleFromHtml(
+          '<html><head><title>Prologue</title></head>'
+          '<body><h1><img src="x"></h1></body></html>',
+          bookTitle: 'Old Book',
+        ),
+        'Prologue',
+      );
+    });
+
+    test('strips markup and decodes entities in a heading', () {
+      expect(
+        chapterTitleFromHtml('<h1>Chapter &amp; <em>One</em></h1>'),
+        'Chapter & One',
       );
     });
   });
