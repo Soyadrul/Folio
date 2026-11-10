@@ -56,4 +56,18 @@ void main() {
     });
     expect(event!.progress, 0);
   });
+
+  test('non-numeric numbers fall back instead of throwing', () {
+    final event = progressEventFromMessage({
+      'type': 'progress',
+      'chapterIndex': 1,
+      'progress': 'half',
+      'page': 'three',
+      'pages': const [9],
+    });
+    expect(event, isNotNull);
+    expect(event!.progress, 0);
+    expect(event.page, 1);
+    expect(event.pages, 1);
+  });
 }

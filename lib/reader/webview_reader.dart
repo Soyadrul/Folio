@@ -35,25 +35,31 @@ class ReaderProgressEvent {
   final String? element;
 }
 
+/// Reads a numeric bridge field without throwing on malformed payloads.
+num? _num(Object? value) => value is num ? value : null;
+
+/// Reads a string bridge field without throwing on malformed payloads.
+String? _string(Object? value) => value is String ? value : null;
+
 /// Parses a `progress` bridge message, rejecting the shell's pre-chapter
 /// placeholder (`chapterIndex: -1`) and malformed payloads.
 ReaderProgressEvent? progressEventFromMessage(Map<String, dynamic> message) {
   if (message['type'] != 'progress') return null;
-  final chapter = (message['chapterIndex'] as num?)?.toInt() ?? -1;
+  final chapter = _num(message['chapterIndex'])?.toInt() ?? -1;
   if (chapter < 0) return null;
-  final rawProgress = (message['progress'] as num?)?.toDouble() ?? 0;
+  final rawProgress = _num(message['progress'])?.toDouble() ?? 0;
   final progress = rawProgress.isFinite
       ? rawProgress.clamp(0.0, 1.0).toDouble()
       : 0.0;
-  final page = (message['page'] as num?)?.toInt() ?? 1;
-  final pages = (message['pages'] as num?)?.toInt() ?? 1;
-  final element = message['element'];
+  final page = _num(message['page'])?.toInt() ?? 1;
+  final pages = _num(message['pages'])?.toInt() ?? 1;
+  final element = _string(message['element']);
   return ReaderProgressEvent(
     chapterIndex: chapter,
     progress: progress,
     page: page < 1 ? 1 : page,
     pages: pages < 1 ? 1 : pages,
-    element: element is String && element.isNotEmpty ? element : null,
+    element: element != null && element.isNotEmpty ? element : null,
   );
 }
 
@@ -135,6 +141,10 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
   String? _restoreElement;
   bool _autoScrollRunning = false;
   int _autoScrollSpeed = 40;
+
+  /// Brightness captured during the last build. `_onLoadStop` can complete
+  /// after the reader closed, when reading `MediaQuery` would throw.
+  Brightness _brightness = Brightness.light;
 
   /// Incremented after the WebView renderer dies so a fresh platform view is
   /// created instead of leaving the reader on a blank page.
@@ -294,7 +304,9 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
 
   Map<String, dynamic> _settingsJson() {
     final settings = widget.settings;
-    final brightness = MediaQuery.of(context).platformBrightness;
+    // `_onLoadStop` can complete after the reader closed. Reading MediaQuery
+    // here used to throw; `_brightness` was captured during the last build.
+    final brightness = _brightness;
     return {
       'mode': settings.readerMode == ReaderMode.book ? 'book' : 'scroll',
       'fontSize': settings.fontSize,
@@ -544,8 +556,8 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
         break;
       case 'pages':
         widget.callbacks.onPage?.call(
-          (message['page'] as num?)?.toInt() ?? 1,
-          (message['pages'] as num?)?.toInt() ?? 1,
+          _num(message['page'])?.toInt() ?? 1,
+          _num(message['pages'])?.toInt() ?? 1,
         );
         break;
       case 'atEnd':
@@ -568,11 +580,8 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
         // Use the chapter the scroll event actually came from. `_currentChapter`
         // can still point at the previous chapter while a load is in flight,
         // which appended the wrong neighbour.
-        final direction = (message['direction'] as num?)?.toInt() == -1
-            ? -1
-            : 1;
-        final from =
-            (message['chapterIndex'] as num?)?.toInt() ?? _currentChapter;
+        final direction = _num(message['direction'])?.toInt() == -1 ? -1 : 1;
+        final from = _num(message['chapterIndex'])?.toInt() ?? _currentChapter;
         final target = direction > 0
             ? widget.document.nextReadingIndex(from)
             : widget.document.previousReadingIndex(from);
@@ -581,19 +590,19 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
         }
         break;
       case 'link':
-        final href = message['href'] as String?;
-        if (href != null) await _handleLink(href);
+        final href = _string(message['href']);
+        if (href != null && href.isNotEmpty) await _handleLink(href);
         break;
       case 'history':
         widget.callbacks.onHistoryChanged?.call(message['canGoBack'] == true);
         break;
       case 'restore':
-        final index = (message['chapterIndex'] as num?)?.toInt();
+        final index = _num(message['chapterIndex'])?.toInt();
         if (index == null) break;
         await _loadChapter(
           index,
-          progress: (message['progress'] as num?)?.toDouble() ?? 0,
-          element: message['element'] as String?,
+          progress: _num(message['progress'])?.toDouble() ?? 0,
+          element: _string(message['element']),
         );
         break;
       case 'toggleChrome':
@@ -602,8 +611,7 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
         break;
       case 'autoScroll':
         _autoScrollRunning = message['running'] == true;
-        _autoScrollSpeed =
-            (message['speed'] as num?)?.toInt() ?? _autoScrollSpeed;
+        _autoScrollSpeed = _num(message['speed'])?.toInt() ?? _autoScrollSpeed;
         widget.callbacks.onAutoScroll?.call(
           _autoScrollRunning,
           _autoScrollSpeed,
@@ -613,7 +621,7 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
         debugPrint('Folio: image failed to load: ${message['src']}');
         break;
       case 'chapterReady':
-        final index = (message['chapterIndex'] as num?)?.toInt();
+        final index = _num(message['chapterIndex'])?.toInt();
         if (index != null) widget.callbacks.onChapterChanged?.call(index);
         break;
     }
@@ -690,6 +698,7 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
 
   @override
   Widget build(BuildContext context) {
+    _brightness = MediaQuery.of(context).platformBrightness;
     final shell = _shellHtml;
     if (shell == null) {
       return const Center(child: CircularProgressIndicator());
@@ -708,8 +717,9 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
         controller.addJavaScriptHandler(
           handlerName: 'folio',
           callback: (args) {
-            // Handler callbacks may return a value to JS; ours are fire-and-forget.
-            _handleMessage(args);
+            // A malformed payload or a closed reader must never surface as an
+            // unhandled async error.
+            _background(_handleMessage(args));
             return null;
           },
         );
