@@ -1009,3 +1009,87 @@ test('an SVG xlink:href anchor is treated as a link', () => {
   assert.equal(reported.length, 1);
   assert.equal(reported[0].href, 'file:///book/ch2.xhtml');
 });
+
+function addAnchor(reader, section, id, top) {
+  const element = reader.document.createElement('p');
+  element.id = id;
+  element._rect = { top, bottom: top + 20, left: 0, right: 400 };
+  section.appendChild(element);
+  return element;
+}
+
+test('the id index is reused across reports in one layout', async () => {
+  const reader = loadReader();
+  reader.scroller.clientWidth = 400;
+  reader.scroller.clientHeight = 600;
+  reader.scroller._rect = { top: 0, bottom: 600, left: 0, right: 400 };
+  reader.folio.init(defaults());
+
+  const section = addSection(reader);
+  let rectCalls = 0;
+  for (let index = 0; index < 400; index += 1) {
+    // Put the first visible anchor far down the chapter so a linear walk from
+    // the top measures every earlier anchor before it finds one on screen.
+    const element = addAnchor(reader, section, `note-${index}`, (index - 200) * 10);
+    const rect = element._rect;
+    element.getBoundingClientRect = () => {
+      rectCalls += 1;
+      return rect;
+    };
+  }
+
+  await wait(40);
+  reader.posts.length = 0;
+  rectCalls = 0;
+  reader.folio.relayout();
+  await wait(40);
+
+  assert.ok(
+    rectCalls < 40,
+    `expected a cached id index, measured ${rectCalls} rects`
+  );
+});
+
+test('chapter measurement stops after a bounded sample', () => {
+  const reader = loadReader();
+  reader.folio.init(defaults({ fontSize: 18 }));
+
+  const section = addSection(reader);
+  section._fontSize = 18;
+  for (let index = 0; index < 1200; index += 1) {
+    addParagraph(reader, section, { size: 18, text: 'x'.repeat(20) });
+  }
+
+  let measured = 0;
+  const original = reader.window.getComputedStyle;
+  reader.window.getComputedStyle = (element) => {
+    measured += 1;
+    return original(element);
+  };
+
+  reader.folio.setSettings({});
+
+  assert.ok(measured < 620, `measured ${measured} elements`);
+});
+
+test('an unchanged chapter is not measured twice', () => {
+  const reader = loadReader();
+  reader.folio.init(defaults({ fontSize: 18 }));
+
+  const section = addSection(reader);
+  section._fontSize = 18;
+  for (let index = 0; index < 50; index += 1) {
+    addParagraph(reader, section, { size: 18, text: 'x'.repeat(1000) });
+  }
+  reader.folio.setSettings({});
+
+  let measured = 0;
+  const original = reader.window.getComputedStyle;
+  reader.window.getComputedStyle = (element) => {
+    measured += 1;
+    return original(element);
+  };
+  reader.folio.setSettings({});
+
+  assert.equal(measured, 0, `re-measured ${measured} styles`);
+});

@@ -123,6 +123,21 @@
   };
   const NON_TEXT_TAGS = { script: true, style: true };
 
+  const MAX_MEASURED_ELEMENTS = 300;
+  const MAX_MEASURED_TEXT = 20000;
+
+  // `layoutVersion` changes only when element positions can have moved: a
+  // resize, a settings change or a chapter splice. Scrolling changes the
+  // viewport, not the document coordinates stored in the id index, so the index
+  // survives the ~8 reports per second that auto-scroll produces.
+  let layoutVersion = 0;
+  const idIndex = new WeakMap();
+  const scaleCache = new WeakMap();
+
+  function invalidateLayout() {
+    layoutVersion += 1;
+  }
+
   // Length of the text that belongs directly to an element, excluding text
   // inside its children. Whitespace is ignored so indentation cannot outweigh
   // real prose when the chapter's dominant size is measured.
@@ -144,6 +159,12 @@
   // internal hierarchy (headings, small caps, footnotes) intact.
   function chapterTextMultiplier(section) {
     if (!section || !window.getComputedStyle) return 1;
+    const size = viewportSize();
+    const cacheKey =
+      state.settings.fontSize + ':' + size.width + 'x' + size.height;
+    const cached = scaleCache.get(section);
+    if (cached && cached.key === cacheKey) return cached.multiplier;
+
     const base = parseFloat(window.getComputedStyle(section).fontSize) || 0;
     if (!base) return 1;
 
@@ -151,29 +172,42 @@
     const elements = [section].concat(
       Array.prototype.slice.call(section.querySelectorAll('*'))
     );
+    // A 20 000-character chapter with thousands of inline spans does not need
+    // every span measured: the dominant size is already clear after a few
+    // hundred paragraphs. The sample also caps total text, so a chapter made
+    // of huge table cells stops early instead of reading every cell twice.
+    let inspected = 0;
+    let textSeen = 0;
     for (const element of elements) {
+      if (inspected >= MAX_MEASURED_ELEMENTS) break;
       const tag = String(element.localName || element.tagName || '').toLowerCase();
       if (NON_TEXT_TAGS[tag] || HEADING_TAGS[tag]) continue;
       const length = directTextLength(element);
       if (length === 0) continue;
+      inspected += 1;
+      textSeen += length;
+
       const computed = window.getComputedStyle(element);
       if (computed.display === 'none' || computed.visibility === 'hidden') {
         continue;
       }
-      const size = parseFloat(computed.fontSize) || 0;
-      if (!size) continue;
-      weights.set(size, (weights.get(size) || 0) + length);
+      const elementSize = parseFloat(computed.fontSize) || 0;
+      if (!elementSize) continue;
+      weights.set(elementSize, (weights.get(elementSize) || 0) + length);
+      if (textSeen >= MAX_MEASURED_TEXT) break;
     }
 
     let best = 0;
     let bestWeight = 0;
-    for (const [size, weight] of weights) {
-      if (weight > bestWeight || (weight === bestWeight && size > best)) {
-        best = size;
+    for (const [elementSize, weight] of weights) {
+      if (weight > bestWeight || (weight === bestWeight && elementSize > best)) {
+        best = elementSize;
         bestWeight = weight;
       }
     }
-    return best > 0 ? best / base : 1;
+    const multiplier = best > 0 ? best / base : 1;
+    scaleCache.set(section, { key: cacheKey, multiplier: multiplier });
+    return multiplier;
   }
 
   function normalizeSectionScale(section) {
@@ -197,6 +231,8 @@
       parent.insertBefore(style, parent.firstElementChild || null);
     }
     style.textContent = css;
+    // The font metrics can change once the bytes finish loading.
+    invalidateLayout();
     relayout(80);
   }
 
@@ -245,30 +281,69 @@
     return clamp((scroller().scrollTop - el.offsetTop) / range, 0, 1);
   }
 
+  function sectionIdIndex(section) {
+    const cached = idIndex.get(section);
+    if (cached && cached.version === layoutVersion) return cached.items;
+    const scroll = scroller();
+    const book = isBook();
+    const origin = book ? scroll.scrollLeft : scroll.scrollTop;
+    const items = [];
+    for (const element of section.querySelectorAll('[id]')) {
+      const id = element.id;
+      if (!id || id.indexOf('folio-') === 0) continue;
+      const rect = element.getBoundingClientRect();
+      items.push({
+        element: element,
+        id: id,
+        start: (book ? rect.left : rect.top) + origin,
+      });
+    }
+    idIndex.set(section, { version: layoutVersion, items: items });
+    return items;
+  }
+
   function visibleElementId() {
     const scroll = scroller();
-    const root = content();
-    if (!scroll || !root) return null;
-    const box = scroll.getBoundingClientRect();
+    if (!scroll) return null;
+    // Only the chapter on screen can own the resume anchor. Searching every
+    // loaded chapter was the original O(number of ids) cost.
+    const section = currentSection() || content();
+    if (!section) return null;
+
+    const items = sectionIdIndex(section);
+    if (!items.length) return null;
+
     const book = isBook();
-    // Search the chapter downwards, not upwards. Walking up from the text
-    // under the finger always reaches the shell wrappers first, and saving
-    // "folio-content" made "resume" jump back to the start of the chapter.
-    for (const el of root.querySelectorAll('[id]')) {
-      const id = el.id;
-      if (!id || id.indexOf('folio-') === 0) continue;
-      const rect = el.getBoundingClientRect();
-      // Elements are in document order, so the first one that starts past the
-      // viewport means every later element is off-screen too.
-      if (book) {
-        if (rect.left >= box.right) break;
-      } else if (rect.top >= box.bottom) {
-        break;
+    const size = viewportSize();
+    const box = scroll.getBoundingClientRect();
+    const origin = book ? scroll.scrollLeft : scroll.scrollTop;
+    const start = origin + (book ? box.left : box.top);
+    const end = start + (book ? size.width : size.height);
+
+    // Find the last element that starts at or above the viewport, then walk
+    // forward. Ids are stored in document order, so binary search replaces the
+    // old linear scan over every id before the viewport.
+    let low = 0;
+    let high = items.length - 1;
+    let first = 0;
+    while (low <= high) {
+      const middle = (low + high) >> 1;
+      if (items[middle].start <= start) {
+        first = middle;
+        low = middle + 1;
+      } else {
+        high = middle - 1;
       }
+    }
+
+    for (let index = first; index < items.length; index += 1) {
+      const item = items[index];
+      if (item.start >= end) break;
+      const rect = item.element.getBoundingClientRect();
       const intersects = book
         ? rect.right > box.left + 2 && rect.left < box.right - 2
         : rect.bottom > box.top + 2 && rect.top < box.bottom;
-      if (intersects) return id;
+      if (intersects) return item.id;
     }
     return null;
   }
@@ -406,6 +481,7 @@
         if (state.auto.running) state.auto.pos -= height;
       }
     }
+    invalidateLayout();
   }
 
   function computeLayout() {
@@ -559,6 +635,7 @@
   }
 
   function clearContent() {
+    invalidateLayout();
     content().innerHTML = '';
     head().innerHTML = '';
     state.index = -1;
@@ -690,6 +767,7 @@
     chapterTransfer.element = null;
     if (!target || !el) return;
     el.innerHTML = html;
+    invalidateLayout();
     // Measure before the first layout so pagination and progress restoration
     // use the normalised font size.
     normalizeSectionScale(el);
@@ -765,6 +843,7 @@
   }
 
   function applySettings(settings) {
+    invalidateLayout();
     const previousMode = state.settings.mode;
     state.settings = Object.assign({}, state.settings, settings || {});
     state.auto.speed = Number(state.settings.scrollSpeed) || 40;
@@ -1069,6 +1148,7 @@
   }
 
   function onResize() {
+    invalidateLayout();
     // Books that size text with viewport units need a fresh measurement.
     sections().forEach(normalizeSectionScale);
     relayout(80);
