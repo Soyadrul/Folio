@@ -237,6 +237,35 @@ void main() {
     expect(find.byType(SvgPicture), findsOneWidget);
   });
 
+  testWidgets('an SVG image with a fragment renders without throwing', (
+    tester,
+  ) async {
+    final directory = Directory.systemTemp.createTempSync('folio_svg_frag_');
+    addTearDown(() {
+      if (directory.existsSync()) directory.deleteSync(recursive: true);
+    });
+    final svg = File(p.join(directory.path, 'fragment.svg'))
+      ..writeAsStringSync(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40">'
+        '<rect id="box" width="40" height="40" fill="#bd8c3c"/></svg>',
+      );
+
+    final document = _FakeDocument([
+      '<p><img src="${Uri.file(svg.path)}#box" alt="drawing"/></p>',
+    ]);
+    await _pumpReader(
+      tester,
+      _readerApp(
+        document: document,
+        controller: ReaderContentController(),
+        changes: [],
+      ),
+    );
+
+    expect(tester.takeException(), isNull);
+    expect(find.byType(SvgPicture), findsOneWidget);
+  });
+
   testWidgets('progress carries the first visible anchor', (tester) async {
     final events = <ReaderProgressEvent>[];
     final controller = ReaderContentController();

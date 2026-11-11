@@ -572,7 +572,11 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
                   if (uri == null || uri.scheme != 'file') {
                     return const SizedBox.shrink();
                   }
-                  final file = File(uri.toFilePath());
+                  final file = File(
+                    // `toFilePath()` rejects a non-empty fragment, and EPUBs
+                    // attach SVG views and media fragments to image sources.
+                    uri.replace(fragment: '').toFilePath(),
+                  );
                   if (!file.existsSync()) return const SizedBox.shrink();
                   if (p.extension(file.path).toLowerCase() == '.svg') {
                     return Padding(
