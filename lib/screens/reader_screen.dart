@@ -90,7 +90,7 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
     _fadeAnimation = CurvedAnimation(parent: _fade, curve: Curves.easeOut);
     _fade.value = 1;
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-    VolumeKeys.setHandler(_onVolumeKey);
+    VolumeKeys.pushHandler(_onVolumeKey);
     final settings = ref.read(settingsNotifierProvider);
     _syncVolumeKeys(settings);
     KeepScreenOn.setEnabled(settings.keepScreenOn);
@@ -106,7 +106,7 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
     // settings change made within the notifier's debounce window.
     unawaited(_settingsNotifier.flush());
     _persistPosition(force: true);
-    VolumeKeys.setHandler(null);
+    VolumeKeys.removeHandler(_onVolumeKey);
     if (_volumeKeysEnabled) VolumeKeys.setEnabled(false);
     KeepScreenOn.setEnabled(false);
     _fade.dispose();

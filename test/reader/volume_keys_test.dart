@@ -26,4 +26,28 @@ void main() {
       expect(scrollSpeedAfterVolumeKey(300, VolumeKey.up), 300);
     });
   });
+
+  test('the newest handler wins and popping restores the previous one', () {
+    VolumeKeys.clearHandlersForTest();
+    final received = <String>[];
+
+    void first(VolumeKey key) => received.add('first:${key.name}');
+    void second(VolumeKey key) => received.add('second:${key.name}');
+
+    VolumeKeys.pushHandler(first);
+    VolumeKeys.pushHandler(second);
+    expect(VolumeKeys.debugHandlers, [first, second]);
+
+    VolumeKeys.dispatchForTest(VolumeKey.down);
+    expect(received, ['second:down']);
+
+    VolumeKeys.removeHandler(second);
+    VolumeKeys.dispatchForTest(VolumeKey.down);
+    expect(received, ['second:down', 'first:down']);
+
+    VolumeKeys.removeHandler(first);
+    expect(VolumeKeys.debugHandlers, isEmpty);
+    VolumeKeys.dispatchForTest(VolumeKey.down);
+    expect(received.length, 2);
+  });
 }

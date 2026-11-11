@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter/services.dart';
 
 import '../models/app_settings.dart';
@@ -41,14 +42,33 @@ class VolumeKeys {
     }
   }
 
-  /// Installs (or clears, with null) the callback for key presses.
-  static void setHandler(void Function(VolumeKey key)? handler) {
-    if (!supported) return;
-    if (handler == null) {
-      _channel.setMethodCallHandler(null);
-      return;
+  static final List<void Function(VolumeKey)> _handlers = [];
+  static bool _installed = false;
+
+  /// Registers [handler] as the current owner of the volume keys.
+  ///
+  /// A second reader pushed on top of the first (an EPUB opened from another
+  /// app) becomes the owner; removing it restores the reader below instead of
+  /// leaving the keys handled by nobody.
+  static void pushHandler(void Function(VolumeKey) handler) {
+    _handlers.add(handler);
+    _install();
+  }
+
+  static void removeHandler(void Function(VolumeKey) handler) {
+    _handlers.remove(handler);
+    if (_handlers.isEmpty) {
+      _installed = false;
+      if (supported) _channel.setMethodCallHandler(null);
     }
+  }
+
+  static void _install() {
+    if (!supported || _installed) return;
+    _installed = true;
     _channel.setMethodCallHandler((call) async {
+      final handler = _handlers.isEmpty ? null : _handlers.last;
+      if (handler == null) return null;
       switch (call.method) {
         case 'volumeUp':
           handler(VolumeKey.up);
@@ -59,5 +79,20 @@ class VolumeKeys {
       }
       return null;
     });
+  }
+
+  @visibleForTesting
+  static List<void Function(VolumeKey)> get debugHandlers =>
+      List.unmodifiable(_handlers);
+
+  @visibleForTesting
+  static void clearHandlersForTest() {
+    _handlers.clear();
+    _installed = false;
+  }
+
+  @visibleForTesting
+  static void dispatchForTest(VolumeKey key) {
+    if (_handlers.isNotEmpty) _handlers.last(key);
   }
 }
