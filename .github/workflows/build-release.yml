@@ -462,6 +462,38 @@ jobs:
               # The EXIT trap removes the keystore and key.properties.
               echo ""
               echo "✅ Release-signed APK created."
+
+              # A Gradle fallback can still sign with the debug key when
+              # key.properties is missing or unreadable. Compare the APK's
+              # signer with the keystore certificate so a published release is
+              # provably production-signed instead of merely "verified".
+              if [ ! -f "android/key.properties" ]; then
+                echo "❌ ERROR: android/key.properties is missing after the build."
+                echo "   Gradle cannot sign with the release key without it."
+                exit 1
+              fi
+
+              APK=build/app/outputs/flutter-apk/app-release.apk
+              # Hash the certificate DER with SHA-256: this is exactly the
+              # value apksigner prints as "certificate SHA-256 digest".
+              KEYSTORE_SHA256=$(keytool -exportcert \
+                -alias "$KEY_ALIAS" \
+                -keystore android/app/release-keystore.jks \
+                -storepass "$KEYSTORE_PASSWORD" 2>/dev/null \
+                | sha256sum | cut -d' ' -f1 || true)
+              APK_SHA256=$(apksigner verify --print-certs "$APK" \
+                | grep -m1 'certificate SHA-256 digest' \
+                | sed 's/.*digest:[[:space:]]*//' \
+                | tr -d ':' | tr '[:upper:]' '[:lower:]' || true)
+
+              if [[ -z "$APK_SHA256" ]] || [[ "$APK_SHA256" != "$KEYSTORE_SHA256" ]]; then
+                echo "❌ ERROR: The APK is not signed with the configured release key."
+                echo "   Expected SHA-256: $KEYSTORE_SHA256"
+                echo "   APK signer SHA-256: ${APK_SHA256:-<none>}"
+                echo "   Gradle probably fell back to the debug key."
+                exit 1
+              fi
+              echo "✅ APK certificate matches the release keystore (SHA-256: $KEYSTORE_SHA256)."
             fi
 
             # Verify whichever key signed the APK (release or debug fallback).

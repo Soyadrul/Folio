@@ -67,6 +67,19 @@ void main() {
     expect(workflow, contains('exit 1'));
   });
 
+  test('publishing verifies the APK uses the release certificate', () {
+    final workflow = File(
+      '.github/workflows/build-release.yml',
+    ).readAsStringSync();
+    // A silent key.properties/Gradle fallback must not reach a release.
+    expect(workflow, contains('if [ ! -f "android/key.properties" ]'));
+    expect(workflow, contains('certificate SHA-256 digest'));
+    expect(
+      workflow,
+      contains('not signed with the configured release key'),
+    );
+  });
+
   test('the release manifest does not request INTERNET', () {
     final manifest = File(
       'android/app/src/main/AndroidManifest.xml',
