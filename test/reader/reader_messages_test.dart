@@ -35,4 +35,25 @@ void main() {
       isNull,
     );
   });
+
+  test('unsupported link schemes produce a visible message', () {
+    expect(
+      unsupportedLinkMessage('http://example.com'),
+      'External links are not opened by Folio.',
+    );
+    expect(
+      unsupportedLinkMessage('https://example.com'),
+      'External links are not opened by Folio.',
+    );
+    expect(
+      unsupportedLinkMessage('mailto:reader@example.com'),
+      'mailto links are not opened by Folio.',
+    );
+    expect(
+      unsupportedLinkMessage('tel:+15551234'),
+      'tel links are not opened by Folio.',
+    );
+    expect(unsupportedLinkMessage('file:///book/ch2.xhtml'), isNull);
+    expect(unsupportedLinkMessage('#note1'), isNull);
+  });
 }

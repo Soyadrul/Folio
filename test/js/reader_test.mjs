@@ -979,3 +979,33 @@ test('pushHistory records the current chapter for goBack', async () => {
   assert.ok(history.length > 0);
   assert.equal(history[history.length - 1].canGoBack, true);
 });
+
+test('a mailto link is reported to Dart instead of being swallowed', () => {
+  const { folio, document, content, posts } = loadReader();
+  folio.setChapter({ index: 0, html: '<p>hi</p>' });
+
+  const link = document.createElement('a');
+  link.setAttribute('href', 'mailto:reader@example.com');
+  content.appendChild(link);
+
+  document.dispatch('click', { target: link, preventDefault() {} });
+
+  const reported = posts.filter((post) => post.type === 'link');
+  assert.equal(reported.length, 1);
+  assert.equal(reported[0].href, 'mailto:reader@example.com');
+});
+
+test('an SVG xlink:href anchor is treated as a link', () => {
+  const { folio, document, content, posts } = loadReader();
+  folio.setChapter({ index: 0, html: '<p>hi</p>' });
+
+  const link = document.createElement('a');
+  link.setAttribute('xlink:href', 'file:///book/ch2.xhtml');
+  content.appendChild(link);
+
+  document.dispatch('click', { target: link, preventDefault() {} });
+
+  const reported = posts.filter((post) => post.type === 'link');
+  assert.equal(reported.length, 1);
+  assert.equal(reported[0].href, 'file:///book/ch2.xhtml');
+});

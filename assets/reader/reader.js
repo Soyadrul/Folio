@@ -842,6 +842,24 @@
 
   /* ── User input ──────────────────────────────────────────────────── */
 
+  // `a[href]` misses SVG anchors that only carry `xlink:href`, and both
+  // pointer handling and click handling need the same answer.
+  function linkAnchor(node) {
+    const anchor = node && node.closest ? node.closest('a') : null;
+    if (!anchor) return null;
+    let href = anchor.getAttribute('href');
+    if (!href) {
+      href = anchor.getAttribute('xlink:href');
+      if (!href && typeof anchor.getAttributeNS === 'function') {
+        href = anchor.getAttributeNS('http://www.w3.org/1999/xlink', 'href');
+      }
+      href = href || '';
+    }
+    if (!href) return null;
+    anchor._folioHref = href;
+    return anchor;
+  }
+
   function onPointerDown(event) {
     if (event.pointerType === 'mouse' && event.button !== 0) return;
     state.touch = {
@@ -852,7 +870,7 @@
       // Only an anchor that actually points somewhere is a link. `<a id="x">`
       // is frequently used as a chapter marker and must keep page turns and
       // the menu working.
-      onLink: !!event.target.closest('a[href]'),
+      onLink: !!linkAnchor(event.target),
     };
   }
 
@@ -890,7 +908,7 @@
       return;
     }
 
-    if (touch.onLink || event.target.closest('a[href]')) return;
+    if (touch.onLink || linkAnchor(event.target)) return;
     if (elapsed > 700) {
       post('toggleChrome');
       return;
@@ -985,9 +1003,9 @@
   }
 
   function onLinkClick(event) {
-    const anchor = event.target.closest('a[href]');
+    const anchor = linkAnchor(event.target);
     if (!anchor) return;
-    const href = anchor.getAttribute('href');
+    const href = anchor._folioHref || '';
     if (!href) return;
     if (href.charAt(0) === '#') {
       let id = href.substring(1);
@@ -1010,13 +1028,11 @@
       reportProgress(true);
       return;
     }
-    if (href.indexOf('file:') === 0 || href.indexOf('http') === 0) {
-      event.preventDefault();
-      if (href.indexOf('file:') === 0) pushHistory();
-      post('link', { href: href });
-      return;
-    }
     event.preventDefault();
+    if (href.indexOf('file:') === 0) pushHistory();
+    // Every non-fragment link is reported: Dart opens local files and shows a
+    // message for web, mailto and tel links instead of failing silently.
+    post('link', { href: href });
   }
 
   function onImageError(event) {

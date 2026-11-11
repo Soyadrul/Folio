@@ -63,6 +63,20 @@ ReaderProgressEvent? progressEventFromMessage(Map<String, dynamic> message) {
   );
 }
 
+/// Returns the message shown when [href] uses a scheme Folio cannot open, or
+/// null when the link is a candidate for a book-internal file reference.
+String? unsupportedLinkMessage(String href) {
+  final uri = Uri.tryParse(href);
+  if (uri == null) return null;
+  if (uri.scheme == 'http' || uri.scheme == 'https') {
+    return 'External links are not opened by Folio.';
+  }
+  if (uri.scheme == 'mailto' || uri.scheme == 'tel') {
+    return '${uri.scheme} links are not opened by Folio.';
+  }
+  return null;
+}
+
 class ReaderCallbacks {
   const ReaderCallbacks({
     this.onProgress,
@@ -533,10 +547,9 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
   }
 
   Future<void> _handleLink(String href) async {
-    final uri = Uri.tryParse(href);
-    if (uri == null) return;
-    if (uri.scheme == 'http' || uri.scheme == 'https') {
-      widget.callbacks.onError?.call('External links are not opened by Folio.');
+    final unsupported = unsupportedLinkMessage(href);
+    if (unsupported != null) {
+      widget.callbacks.onError?.call(unsupported);
       return;
     }
     final link = parseFileLink(href);
