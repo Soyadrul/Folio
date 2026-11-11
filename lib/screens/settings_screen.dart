@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import '../library/cache_service.dart';
 import '../models/app_settings.dart';
 import '../providers/settings_provider.dart';
 import '../utils/theme_utils.dart';
@@ -14,7 +15,10 @@ import '../utils/theme_utils.dart';
 /// [SettingsNotifier], so there is no Save button and closing the app keeps
 /// the latest values.
 class SettingsScreen extends ConsumerWidget {
-  const SettingsScreen({super.key});
+  const SettingsScreen({super.key, this.keepBookPath});
+
+  /// The EPUB the reader is showing, so "Clear cache" keeps its extraction.
+  final String? keepBookPath;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -256,6 +260,58 @@ class SettingsScreen extends ConsumerWidget {
                 value: settings.scrollAutoStart,
                 onChanged: (v) =>
                     notifier.update((s) => s.copyWith(scrollAutoStart: v)),
+              ),
+            ],
+          ),
+
+          // ── Storage ──────────────────────────────────────────────────
+          _buildSection(
+            context,
+            title: 'Storage',
+            children: [
+              ListTile(
+                key: const ValueKey('clear-cache'),
+                contentPadding: EdgeInsets.zero,
+                title: Text(
+                  'Clear cache',
+                  style: GoogleFonts.lato(fontWeight: FontWeight.w600),
+                ),
+                subtitle: Text(
+                  'Removes extracted books and cover thumbnails.',
+                  style: _subtitleStyle(context),
+                ),
+                onTap: () async {
+                  final confirmed = await showDialog<bool>(
+                    context: context,
+                    builder: (dialogContext) => AlertDialog(
+                      title: const Text('Clear cache?'),
+                      content: const Text(
+                        'Books and covers are rebuilt when they are next '
+                        'opened. The book you are reading stays available.',
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () =>
+                              Navigator.of(dialogContext).pop(false),
+                          child: const Text('Cancel'),
+                        ),
+                        TextButton(
+                          onPressed: () =>
+                              Navigator.of(dialogContext).pop(true),
+                          child: const Text('Clear'),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (confirmed != true) return;
+                  await ref
+                      .read(cacheServiceProvider)
+                      .clear(keepBookPaths: {?keepBookPath});
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Cache cleared')),
+                  );
+                },
               ),
             ],
           ),

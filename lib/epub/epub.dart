@@ -225,10 +225,19 @@ class EpubDocument {
 /// The cache key is the absolute file path; a sidecar file records size and
 /// modification time, so a changed book is extracted again.
 class EpubLoader {
-  EpubLoader({Directory? cacheRoot}) : _cacheRoot = cacheRoot;
+  EpubLoader({Directory? cacheRoot, this.beforeReplace})
+    : _cacheRoot = cacheRoot;
 
   final Directory? _cacheRoot;
   Future<Directory>? _resolvedRoot;
+
+  /// Test hook that runs while the previous extraction still exists.
+  final Future<void> Function(Directory previous, Directory fresh)?
+  beforeReplace;
+
+  /// The directory that holds extracted books. Used by cache maintenance and
+  /// by the Settings "Clear cache" action.
+  Future<Directory> cacheDirectory() => _root();
 
   /// Loads currently running in this process, keyed by cache root and book.
   ///
@@ -302,6 +311,8 @@ class EpubLoader {
       await _extractAtomically(file, dir, absolute, stat);
     }
 
+    await _touchAccess(dir);
+
     final container = await _findAndParseContainer(dir);
     return _parse(
       filePath: absolute,
@@ -333,11 +344,46 @@ class EpubLoader {
         }),
         flush: true,
       );
-      if (await dir.exists()) await dir.delete(recursive: true);
-      await temp.rename(dir.path);
+      final previous = Directory(
+        '${dir.path}.old-${DateTime.now().microsecondsSinceEpoch}-${_tempCounter++}',
+      );
+      final hadPrevious = await dir.exists();
+      if (hadPrevious) {
+        if (beforeReplace != null) await beforeReplace!(dir, temp);
+        await dir.rename(previous.path);
+      }
+      try {
+        await temp.rename(dir.path);
+      } catch (_) {
+        if (hadPrevious && await previous.exists()) {
+          try {
+            await previous.rename(dir.path);
+          } on FileSystemException {
+            // The next load treats a copy without a marker as stale.
+          }
+        }
+        rethrow;
+      }
+      if (hadPrevious) {
+        try {
+          await previous.delete(recursive: true);
+        } on FileSystemException {
+          // Removed by the next stale-folder sweep.
+        }
+      }
     } catch (_) {
       if (await temp.exists()) await temp.delete(recursive: true);
       rethrow;
+    }
+  }
+
+  Future<void> _touchAccess(Directory dir) async {
+    try {
+      await File(
+        p.join(dir.path, '.folio-access'),
+      ).writeAsString('', flush: false);
+    } on FileSystemException {
+      // Pruning is best-effort; a read-only cache must not break opening.
     }
   }
 
@@ -345,7 +391,7 @@ class EpubLoader {
   Future<void> _cleanupStaleExtractions(Directory dir) async {
     final parent = Directory(p.dirname(dir.path));
     if (!await parent.exists()) return;
-    final prefix = '${p.basename(dir.path)}.tmp-';
+    final prefix = '${p.basename(dir.path)}.';
     try {
       await for (final entity in parent.list(followLinks: false)) {
         if (entity is! Directory) continue;
@@ -361,10 +407,41 @@ class EpubLoader {
     }
   }
 
-  /// Removes every extracted book from the cache.
-  Future<void> clearCache() async {
+  /// Removes extracted books, except those in [keepBookPaths].
+  ///
+  /// The reader passes the book it is showing so clearing the cache from
+  /// Settings cannot delete the files its next chapter needs.
+  Future<void> clearCache({Set<String> keepBookPaths = const {}}) async {
     final root = await _root();
-    if (await root.exists()) await root.delete(recursive: true);
+    if (!await root.exists()) return;
+    if (keepBookPaths.isEmpty) {
+      await root.delete(recursive: true);
+      return;
+    }
+    try {
+      await for (final entity in root.list(followLinks: false)) {
+        if (entity is! Directory) continue;
+        if (keepBookPaths.contains(await _cachedSourcePath(entity))) continue;
+        try {
+          await entity.delete(recursive: true);
+        } on FileSystemException {
+          // A folder another process still uses is left for the next sweep.
+        }
+      }
+    } on FileSystemException {
+      // A read-only cache is not a user-facing error.
+    }
+  }
+
+  Future<String?> _cachedSourcePath(Directory dir) async {
+    final marker = File(p.join(dir.path, '.folio-cache.json'));
+    try {
+      if (!await marker.exists()) return null;
+      final raw = jsonDecode(await marker.readAsString());
+      return raw is Map && raw['path'] is String ? raw['path'] as String : null;
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<Uint8List> _readEpubBytes(File file) async {

@@ -24,6 +24,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'epub/epub_metadata.dart';
 import 'library/cache_maintenance.dart';
+import 'library/cache_service.dart';
 import 'models/book.dart';
 import 'providers/settings_provider.dart';
 import 'screens/home_screen.dart';
@@ -110,6 +111,7 @@ class _FolioAppState extends State<FolioApp> {
     try {
       final cache = await getTemporaryDirectory();
       await pruneIncomingFiles(cache);
+      await CacheService().prune();
     } catch (error) {
       debugPrint('Folio: could not prune the cache: $error');
     }

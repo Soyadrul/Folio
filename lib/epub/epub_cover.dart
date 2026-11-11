@@ -28,12 +28,25 @@ class EpubCover {
 ///
 /// Returns null for a missing, damaged or cover-less book instead of throwing,
 /// because a library card can always fall back to its placeholder.
-Future<EpubCover?> readEpubCover(String filePath) async {
+Future<EpubCover?> readEpubCover(String filePath) =>
+    _readEpubCover(filePath, strict: false);
+
+/// Like [readEpubCover], but throws when the file or its container cannot be
+/// read at all. Callers use this to distinguish "this book has no cover" from
+/// "this read failed", which must not be remembered as a permanent answer.
+Future<EpubCover?> readEpubCoverStrict(String filePath) =>
+    _readEpubCover(filePath, strict: true);
+
+Future<EpubCover?> _readEpubCover(
+  String filePath, {
+  required bool strict,
+}) async {
   final InputFileStream input;
   try {
     input = InputFileStream(filePath);
   } catch (_) {
     // A missing or unreadable file opens no stream to close.
+    if (strict) rethrow;
     return null;
   }
 
@@ -42,17 +55,22 @@ Future<EpubCover?> readEpubCover(String filePath) async {
     archive = ZipDecoder().decodeStream(input);
   } catch (_) {
     await input.close();
+    if (strict) rethrow;
     return null;
   }
 
   try {
-    return _readCoverFromArchive(archive, filePath);
+    return _readCoverFromArchive(archive, filePath, strict: strict);
   } finally {
     await input.close();
   }
 }
 
-EpubCover? _readCoverFromArchive(Archive archive, String filePath) {
+EpubCover? _readCoverFromArchive(
+  Archive archive,
+  String filePath, {
+  required bool strict,
+}) {
   final entries = <String, ArchiveFile>{};
   for (final file in archive.files) {
     if (!file.isFile) continue;
@@ -80,7 +98,12 @@ EpubCover? _readCoverFromArchive(Archive archive, String filePath) {
 
   try {
     final containerEntry = entry('META-INF/container.xml');
-    if (containerEntry == null) return null;
+    if (containerEntry == null) {
+      if (strict) {
+        throw const FormatException('EPUB has no META-INF/container.xml');
+      }
+      return null;
+    }
     final container = XmlDocument.parse(
       _text(containerEntry.readBytes() ?? const []),
     );
@@ -194,6 +217,7 @@ EpubCover? _readCoverFromArchive(Archive archive, String filePath) {
     return EpubCover(entryName: coverPath, bytes: bytes);
   } catch (_) {
     // A damaged container/package/cover must not stop the library scan.
+    if (strict) rethrow;
     return null;
   }
 }

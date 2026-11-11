@@ -224,9 +224,11 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
 
   Future<void> _openSettings() async {
     _content.pauseAutoScroll();
-    await Navigator.of(
-      context,
-    ).push(MaterialPageRoute(builder: (_) => const SettingsScreen()));
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => SettingsScreen(keepBookPath: widget.book.path),
+      ),
+    );
     if (mounted) _syncVolumeKeys(ref.read(settingsNotifierProvider));
   }
 

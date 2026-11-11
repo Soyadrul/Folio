@@ -140,4 +140,43 @@ void main() {
     await serviceUnderTest.clearCache();
     expect(File(path).existsSync(), isFalse);
   });
+
+  test('a temporary read failure does not leave a permanent marker', () async {
+    final broken = File(p.join(tmp.path, 'temporarily-broken.epub'));
+    await broken.writeAsBytes([1, 2, 3, 4]);
+
+    expect(await service().thumbnailFor(bookFor(broken)), isNull);
+
+    final markers = coverCache.existsSync()
+        ? coverCache
+              .listSync(recursive: true)
+              .whereType<File>()
+              .where((file) => file.path.endsWith('.none'))
+        : const <File>[];
+    expect(markers, isEmpty);
+  });
+
+  test('a readable book without a cover does leave a marker', () async {
+    final opf = epub2Opf.replaceFirst(
+      '    <meta name="cover" content="cover-img"/>\n',
+      '',
+    );
+    final chapter = chapterOne.replaceFirst(
+      '<p><img src="../images/pic.jpg" alt="pic"/></p>',
+      '',
+    );
+    final entries = epub2Entries(opf: opf)..remove('OEBPS/images/pic.jpg');
+    final file = await EpubFixture.write(tmp, <String, Object>{
+      ...entries,
+      'OEBPS/text/ch1.xhtml': chapter,
+    }, name: 'no-cover.epub');
+
+    expect(await service().thumbnailFor(bookFor(file)), isNull);
+
+    final markers = coverCache
+        .listSync(recursive: true)
+        .whereType<File>()
+        .where((candidate) => candidate.path.endsWith('.none'));
+    expect(markers, hasLength(1));
+  });
 }

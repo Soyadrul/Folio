@@ -48,6 +48,8 @@ class CoverService {
     }();
   }
 
+  Future<Directory> cacheDirectory() => _root();
+
   /// Returns the thumbnail path for [book], or null when the book has no
   /// usable cover. Never throws: a broken book just keeps its placeholder.
   Future<String?> thumbnailFor(Book book) async {
@@ -101,7 +103,7 @@ class CoverService {
       final rendered = await _withSlot(() async {
         // Read only the container, package document and cover entry: the book
         // itself is never extracted, so browsing the library stays cheap.
-        final cover = await Isolate.run(() => readEpubCover(bookPath));
+        final cover = await Isolate.run(() => readEpubCoverStrict(bookPath));
         if (cover == null) return false;
         await Directory(p.dirname(destination)).create(recursive: true);
         return Isolate.run(
@@ -113,13 +115,15 @@ class CoverService {
         );
       });
       if (rendered && await File(destination).exists()) return destination;
+      // Reaching this point means the EPUB was read successfully. Either it
+      // has no cover or the image bytes are not decodable; both are stable
+      // properties of this file, so remembering the answer is safe.
       await _writeMissingMarker(missingMarker);
       return null;
     } catch (e) {
-      // A damaged cover, unsupported image format or unreadable book must not
-      // stop the rest of the library.
+      // Storage, isolate and memory failures are temporary. Writing `.none`
+      // here made the book show a placeholder until the file changed.
       debugPrint('Folio: no cover for $bookPath ($e)');
-      await _writeMissingMarker(missingMarker);
       return null;
     }
   }
