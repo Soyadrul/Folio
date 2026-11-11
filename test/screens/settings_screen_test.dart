@@ -85,6 +85,21 @@ void main() {
     expect(saved.readerMode, ReaderMode.scroll);
   });
 
+  testWidgets('Reset asks for confirmation before discarding settings', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const ProviderScope(child: MaterialApp(home: SettingsScreen())),
+    );
+
+    await tester.tap(find.text('Reset'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Reset settings?'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+  });
+
   testWidgets('theme choices are Light, Sepia and Dark only', (tester) async {
     await tester.pumpWidget(
       ProviderScope(

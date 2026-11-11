@@ -28,7 +28,28 @@ class SettingsScreen extends ConsumerWidget {
         leading: const BackButton(),
         actions: [
           TextButton(
-            onPressed: () => notifier.reset(),
+            onPressed: () async {
+              final confirmed = await showDialog<bool>(
+                context: context,
+                builder: (dialogContext) => AlertDialog(
+                  title: const Text('Reset settings?'),
+                  content: const Text(
+                    'Every reading and display setting returns to its default.',
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.of(dialogContext).pop(false),
+                      child: const Text('Cancel'),
+                    ),
+                    TextButton(
+                      onPressed: () => Navigator.of(dialogContext).pop(true),
+                      child: const Text('Reset'),
+                    ),
+                  ],
+                ),
+              );
+              if (confirmed == true) await notifier.reset();
+            },
             child: Text(
               'Reset',
               style: GoogleFonts.lato(

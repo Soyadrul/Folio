@@ -6,7 +6,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:folio/epub/epub.dart';
+import 'package:folio/models/app_settings.dart';
 import 'package:folio/models/book.dart';
+import 'package:folio/providers/settings_provider.dart';
 import 'package:folio/reader/reading_position.dart';
 import 'package:folio/reader/webview_reader.dart';
 import 'package:folio/screens/reader_screen.dart';
@@ -252,6 +254,53 @@ void main() {
     expect(stored['chapterIndex'], greaterThanOrEqualTo(0));
     final saved = ReadingPosition.fromJson(stored);
     expect(saved.chapterIndex, greaterThanOrEqualTo(0));
+  });
+
+  testWidgets('pausing the app flushes pending settings immediately', (
+    tester,
+  ) async {
+    final book = Book(path: epub.path, title: 'Old Book', author: 'Jane Doe');
+    final loader = EpubLoader(cacheRoot: Directory(p.join(tmp.path, 'cache')));
+
+    await tester.runAsync(() async {
+      await tester.pumpWidget(
+        ProviderScope(
+          child: MaterialApp(
+            theme: buildLightTheme(),
+            home: ReaderScreen(book: book, loader: loader),
+          ),
+        ),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 1500));
+    });
+    await tester.pump();
+
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(ReaderScreen)),
+    );
+    await tester.runAsync(() async {
+      await container
+          .read(settingsNotifierProvider.notifier)
+          .update((s) => s.copyWith(fontSize: 19));
+    });
+
+    final prefs = await SharedPreferences.getInstance();
+    // Still inside the notifier's 250 ms debounce window: nothing on disk yet.
+    expect(prefs.getString('folio_app_settings'), isNull);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    });
+
+    final saved = AppSettings.fromJsonString(
+      prefs.getString('folio_app_settings')!,
+    );
+    expect(saved.fontSize, 19);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
   });
 }
 

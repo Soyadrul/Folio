@@ -49,6 +49,7 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
   /// Captured while the widget is alive so the last save in [dispose] does not
   /// have to read `ref`, which Riverpod forbids once unmounting starts.
   late final LibraryNotifier _library;
+  late final SettingsNotifier _settingsNotifier;
 
   int _chapterIndex = 0;
   double _chapterProgress = 0;
@@ -79,6 +80,7 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
     WidgetsBinding.instance.addObserver(this);
     _loader = widget.loader ?? EpubLoader();
     _library = ref.read(libraryProvider.notifier);
+    _settingsNotifier = ref.read(settingsNotifierProvider.notifier);
     _chapterIndex = widget.book.lastChapterIndex;
     _chapterProgress = widget.book.lastProgress;
     _fade = AnimationController(
@@ -100,6 +102,9 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
     WidgetsBinding.instance.removeObserver(this);
     _saveTimer?.cancel();
     _runtimeErrorTimer?.cancel();
+    // The process can be killed right after the reader closes; do not lose a
+    // settings change made within the notifier's debounce window.
+    unawaited(_settingsNotifier.flush());
     _persistPosition(force: true);
     VolumeKeys.setHandler(null);
     if (_volumeKeysEnabled) VolumeKeys.setEnabled(false);
@@ -113,8 +118,10 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) {
       _content.pauseAutoScroll();
-      // The process can be killed in the background, so save now instead of
-      // waiting for dispose.
+      // A settings change may still be waiting in the notifier's debounce
+      // window. The process can be killed in the background, so flush it before
+      // saving the position.
+      unawaited(_settingsNotifier.flush());
       _persistPosition(force: true);
     } else if (_uiVisible) {
       _fade.forward();

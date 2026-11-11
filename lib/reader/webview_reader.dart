@@ -134,6 +134,13 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
   double _lastProgress = 0;
   String? _lastElement;
 
+  Timer? _settingsTimer;
+
+  /// The settings the reader last pushed to the page. Debounced reflows compare
+  /// against this instead of the previous widget build, which may have been
+  /// superseded several slider ticks ago.
+  AppSettings? _appliedSettings;
+
   /// Values used by `_onLoadStop` to restore the reader after the shell
   /// reloads. Only chapter loads and real progress events update them; the
   /// shell's pre-chapter placeholder never reaches them.
@@ -172,6 +179,7 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
     _lastElement = widget.initialElement;
     _restoreProgress = widget.initialProgress;
     _restoreElement = widget.initialElement;
+    _appliedSettings = widget.settings;
     _loadShell();
   }
 
@@ -189,25 +197,32 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
     }
     if (oldWidget.settings == widget.settings) return;
 
-    final modeChanged =
-        oldWidget.settings.readerMode != widget.settings.readerMode;
+    final previous = _appliedSettings ?? oldWidget.settings;
+    final next = widget.settings;
+    final modeChanged = previous.readerMode != next.readerMode;
     final typographyChanged =
-        oldWidget.settings.fontSize != widget.settings.fontSize ||
-        oldWidget.settings.lineHeight != widget.settings.lineHeight ||
-        oldWidget.settings.fontFamily != widget.settings.fontFamily ||
-        oldWidget.settings.textAlign != widget.settings.textAlign ||
-        oldWidget.settings.hyphenation != widget.settings.hyphenation ||
-        oldWidget.settings.readingMode != widget.settings.readingMode;
-    final marginChanged =
-        oldWidget.settings.marginHorizontal != widget.settings.marginHorizontal;
+        previous.fontSize != next.fontSize ||
+        previous.lineHeight != next.lineHeight ||
+        previous.fontFamily != next.fontFamily ||
+        previous.textAlign != next.textAlign ||
+        previous.hyphenation != next.hyphenation ||
+        previous.readingMode != next.readingMode;
+    final marginChanged = previous.marginHorizontal != next.marginHorizontal;
 
-    _background(
-      _applySettingsAndRestore(
-        modeChanged: modeChanged,
-        reflow: typographyChanged || marginChanged,
-        marginChanged: marginChanged,
-      ),
-    );
+    // A slider emits a value per pixel. Applying every one started a new
+    // reflow while the previous one was still running; coalesce to the last.
+    _settingsTimer?.cancel();
+    _settingsTimer = Timer(const Duration(milliseconds: 120), () {
+      if (!mounted) return;
+      _appliedSettings = widget.settings;
+      _background(
+        _applySettingsAndRestore(
+          modeChanged: modeChanged,
+          reflow: typographyChanged || marginChanged,
+          marginChanged: marginChanged,
+        ),
+      );
+    });
   }
 
   Future<void> _applySettingsAndRestore({
@@ -354,6 +369,7 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
 
   @override
   void dispose() {
+    _settingsTimer?.cancel();
     widget.controller.detach(this);
     super.dispose();
   }
