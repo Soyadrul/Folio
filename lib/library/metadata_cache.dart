@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:path/path.dart' as p;
+
 /// A small JSON cache of library metadata (title/author) keyed by file path.
 ///
 /// Re-reading the container and package document of every EPUB on each launch
@@ -74,22 +76,50 @@ class MetadataCache {
     };
   }
 
-  /// Drops entries for files that are no longer in the scanned folder.
-  void retainOnly(Set<String> paths) {
-    _entries.removeWhere((path, _) => !paths.contains(path));
+  /// Drops entries for files that were scanned but no longer exist in
+  /// [folderPath].
+  ///
+  /// Entries belonging to another library folder are kept: switching between
+  /// two folders used to delete the other folder's cache and re-read every
+  /// book on the next switch.
+  void retainWithin(String folderPath, Set<String> paths) {
+    final root = p.normalize(p.absolute(folderPath));
+    _entries.removeWhere((path, _) {
+      final absolute = p.normalize(p.absolute(path));
+      final inFolder = absolute == root || p.isWithin(root, absolute);
+      return inFolder && !paths.contains(path);
+    });
   }
+
+  static final Map<String, Future<void>> _writes = {};
 
   Future<void> save() async {
     final path = _path;
     if (path == null) return;
+    final previous = _writes[path] ?? Future<void>.value();
+    final next = previous.then((_) => _writeAtomically(path));
+    _writes[path] = next.catchError((_) {});
+    return next;
+  }
+
+  Future<void> _writeAtomically(String path) async {
+    final file = File(path);
+    final temporary = File('$path.tmp');
     try {
-      await File(path).parent.create(recursive: true);
-      await File(path).writeAsString(
+      await file.parent.create(recursive: true);
+      await temporary.writeAsString(
         jsonEncode({'version': _version, 'entries': _entries}),
         flush: true,
       );
+      // POSIX rename replaces the destination in one step, so a scan that is
+      // reading the file never sees half a JSON document.
+      await temporary.rename(path);
     } catch (_) {
-      // The cache is an optimisation; a read-only drive must not break scans.
+      try {
+        if (await temporary.exists()) await temporary.delete();
+      } on FileSystemException {
+        // Nothing else to do; the cache is an optimisation.
+      }
     }
   }
 }

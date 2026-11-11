@@ -123,4 +123,29 @@ void main() {
     expect(scan.skippedFolders, greaterThan(0));
     expect(scan.unreadablePaths.any((path) => path.contains('locked')), isTrue);
   });
+
+  test('switching library folders reuses the cache of both folders', () async {
+    final firstDir = Directory(p.join(tmp.path, 'first'))..createSync();
+    final secondDir = Directory(p.join(tmp.path, 'second'))..createSync();
+    await writeBook('first/a.epub', epub2Entries());
+    await writeBook('second/b.epub', epub3Entries());
+    final cachePath = p.join(tmp.path, 'cache', 'metadata.json');
+
+    final first = await scanFolderForBooks(
+      firstDir.path,
+      cachePath: cachePath,
+    );
+    expect(first.cacheHits, 0);
+
+    final second = await scanFolderForBooks(
+      secondDir.path,
+      cachePath: cachePath,
+    );
+    expect(second.cacheHits, 0);
+    expect(second.books.single.title, 'New Book');
+
+    final again = await scanFolderForBooks(firstDir.path, cachePath: cachePath);
+    expect(again.books.single.title, 'Old Book');
+    expect(again.cacheHits, 1);
+  });
 }

@@ -65,7 +65,7 @@ Future<LibraryScan> scanFolderForBooks(
   List<Map<String, Object?>> metadata;
   try {
     metadata = await Isolate.run(
-      () => _readAllMetadata(collected.paths, cachePath),
+      () => _readAllMetadata(collected.paths, cachePath, folderPath),
     );
   } on Object {
     metadata = const [];
@@ -103,6 +103,7 @@ Future<LibraryScan> scanFolderForBooks(
 Future<List<Map<String, Object?>>> _readAllMetadata(
   List<String> paths,
   String? cachePath,
+  String folderPath,
 ) async {
   final cache = await MetadataCache.load(cachePath);
   final results = <Map<String, Object?>>[];
@@ -158,7 +159,7 @@ Future<List<Map<String, Object?>>> _readAllMetadata(
     }
   }
 
-  cache.retainOnly(paths.toSet());
+  cache.retainWithin(folderPath, paths.toSet());
   await cache.save();
   return results;
 }
