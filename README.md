@@ -10,18 +10,18 @@ built with Flutter.
 | Feature | Detail |
 |---|---|
 | EPUB support | EPUB 2 & 3, including nested NCX/nav tables of contents |
-| Rendering | Android uses a bundled WebView reader; Linux uses a native Flutter reader |
+| Rendering | Android uses a bundled WebView reader; Linux uses a native Flutter reader (scroll mode) |
 | Library scan | Pick any folder; sub-folders are scanned automatically |
 | Resume reading | Last chapter + scroll position saved per book |
 | Table of contents | Slide-out drawer with all chapter links |
 | In-book links | Footnotes and same-chapter links stay inside the reader |
 | Distraction-free reader | Full-screen immersive mode; tap to toggle controls |
-| 4 display modes | **Auto** · **Light** · **Dark** · **Sepia** |
-| Font family | 12 font families bundled for offline use |
+| 3 display modes | **Light** · **Dark** · **Sepia** (the old Auto value is kept only for saved settings) |
+| Font family | 12 font families bundled for offline use (Latin + Latin-ext) |
 | Font size | Adjustable from 10 px to 40 px |
 | Line spacing | 1.0 – 2.2 multiplier |
 | Side margins | 0 px – 48 px |
-| Reading modes | **Book** (paginated) and **Scroll** (continuous) |
+| Reading modes | Book (paginated, Android) and Scroll (continuous, Android + Linux) |
 | Auto-scroll | Adjustable speed with tap-to-start/stop |
 | Progress bar | Thin reading-progress strip (toggleable) |
 | Keep screen on | Prevents display dimming while reading (Android) |
@@ -162,6 +162,7 @@ acceptance checklist.
 |---|---|
 | `flutter_inappwebview` | Android WebView that renders chapters with `assets/reader` |
 | `flutter_html` | Native HTML rendering for the Linux reader |
+| `flutter_svg` | SVG images in the Linux reader |
 | `archive` | EPUB ZIP extraction |
 | `xml` | Container/OPF/NCX parsing |
 | `html` | HTML parsing for nav documents and cover pages |
@@ -205,7 +206,6 @@ changes its background and text colour.
 |---|---|
 | `READ_EXTERNAL_STORAGE` (≤ API 32) | Read `.epub` files from external storage on Android ≤ 12 |
 | `MANAGE_EXTERNAL_STORAGE` (API 30+) | Browse arbitrary folders without SAF |
-| `INTERNET` | Google Fonts downloads font files on first use (cached offline after) |
 
 `MANAGE_EXTERNAL_STORAGE` is a restricted permission on Google Play. A Play
 release must either justify it as a document reader or switch to SAF-only
@@ -215,10 +215,11 @@ access; see the note in `android/app/src/main/AndroidManifest.xml`.
 
 ## 🔧 Customisation Tips
 
-**Adding more fonts** – open `lib/utils/theme_utils.dart` and add a
-[Google Fonts](https://fonts.google.com/) name to `kAvailableFonts`. The native
-Linux reader resolves names through `google_fonts`; the Android WebView uses
-the bundled files in `assets/reader/fonts`.
+**Adding more fonts** – add a [Google Fonts](https://fonts.google.com/) name to
+`kAvailableFonts` in `lib/utils/theme_utils.dart` and bundle its
+`<Family>-Regular.ttf` in `assets/google_fonts/` (runtime fetching is
+disabled). The Android WebView uses the separate WOFF2 files in
+`assets/reader/fonts`.
 
 **Changing the accent colour** – edit `kAccentColor` in `theme_utils.dart`.
 

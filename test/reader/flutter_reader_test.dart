@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:folio/epub/chapter_html.dart';
 import 'package:folio/epub/epub.dart';
@@ -9,7 +10,9 @@ import 'package:folio/epub/href_resolver.dart';
 import 'package:folio/models/app_settings.dart';
 import 'package:folio/reader/flutter_reader.dart';
 import 'package:folio/reader/reader_content_controller.dart';
-import 'package:folio/reader/webview_reader.dart' show ReaderCallbacks;
+import 'package:folio/reader/webview_reader.dart'
+    show ReaderCallbacks, ReaderProgressEvent;
+import 'package:path/path.dart' as p;
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -207,12 +210,94 @@ void main() {
 
     expect(state.autoScrollSpeed, 120);
   });
+
+  testWidgets('SVG images render in the Linux reader', (tester) async {
+    final directory = Directory.systemTemp.createTempSync('folio_svg_');
+    addTearDown(() {
+      if (directory.existsSync()) directory.deleteSync(recursive: true);
+    });
+    final svg = File(p.join(directory.path, 'picture.svg'))
+      ..writeAsStringSync(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40">'
+        '<rect width="40" height="40" fill="#bd8c3c"/></svg>',
+      );
+
+    final document = _FakeDocument([
+      '<p>Before</p><p><img src="${Uri.file(svg.path)}" alt="drawing"/></p>',
+    ]);
+    await _pumpReader(
+      tester,
+      _readerApp(
+        document: document,
+        controller: ReaderContentController(),
+        changes: [],
+      ),
+    );
+
+    expect(find.byType(SvgPicture), findsOneWidget);
+  });
+
+  testWidgets('progress carries the first visible anchor', (tester) async {
+    final events = <ReaderProgressEvent>[];
+    final controller = ReaderContentController();
+    final document = _FakeDocument([_anchoredBody()]);
+
+    await _pumpReader(
+      tester,
+      _readerApp(
+        document: document,
+        controller: controller,
+        changes: [],
+        callbacks: ReaderCallbacks(
+          onChapterChanged: (_) {},
+          onProgress: events.add,
+        ),
+      ),
+    );
+
+    events.clear();
+    await controller.goToProgress(0.5);
+    await tester.pump(const Duration(milliseconds: 130));
+    await _pumpFrames(tester, 2);
+
+    expect(events, isNotEmpty);
+    expect(events.last.element, isNotNull);
+  });
+
+  testWidgets('scroll notifications are coalesced into one report', (
+    tester,
+  ) async {
+    var pages = 0;
+    final document = _FakeDocument([_longBody(), _longBody()]);
+
+    await _pumpReader(
+      tester,
+      _readerApp(
+        document: document,
+        controller: ReaderContentController(),
+        changes: [],
+        callbacks: ReaderCallbacks(
+          onChapterChanged: (_) {},
+          onPage: (_, _) => pages++,
+        ),
+      ),
+    );
+
+    pages = 0;
+    await tester.drag(find.byType(FlutterReader), const Offset(0, -200));
+    await tester.pump();
+    expect(pages, 0, reason: 'the first notification only schedules a report');
+
+    await tester.pump(const Duration(milliseconds: 121));
+    expect(pages, 1, reason: 'the pending notifications collapse into one');
+  });
 }
 
 Widget _readerApp({
   required EpubDocument document,
   required ReaderContentController controller,
   required List<int> changes,
+  ReaderCallbacks? callbacks,
   int initialChapter = 0,
   AppSettings settings = const AppSettings(),
 }) {
@@ -225,7 +310,8 @@ Widget _readerApp({
           child: FlutterReader(
             document: document,
             settings: settings,
-            callbacks: ReaderCallbacks(onChapterChanged: changes.add),
+            callbacks:
+                callbacks ?? ReaderCallbacks(onChapterChanged: changes.add),
             controller: controller,
             initialChapter: initialChapter,
           ),
@@ -253,6 +339,13 @@ String _longBody() => List.generate(
   (index) =>
       '<p>Paragraph $index with enough words to fill an ordinary page of '
       'reading text in the fallback reader.</p>',
+).join();
+
+String _anchoredBody() => List.generate(
+  80,
+  (index) =>
+      '<p id="anchor-$index">Paragraph $index with enough words to fill an '
+      'ordinary page of reading text in the fallback reader.</p>',
 ).join();
 
 /// An [EpubDocument] whose chapters are handed out directly, so the widget

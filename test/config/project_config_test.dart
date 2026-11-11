@@ -100,4 +100,12 @@ void main() {
       contains('- assets/google_fonts/'),
     );
   });
+
+  test('the README describes the reading modes that actually exist', () {
+    final readme = File('README.md').readAsStringSync();
+    expect(readme, isNot(contains('4 display modes')));
+    expect(readme, contains('3 display modes'));
+    expect(readme, contains('Book (paginated, Android)'));
+    expect(readme, contains('Scroll (continuous, Android + Linux)'));
+  });
 }

@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_html/flutter_html.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:path/path.dart' as p;
 
 import '../epub/chapter_html.dart';
@@ -63,6 +65,13 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
   GlobalKey _anchorKey = GlobalKey();
 
   final List<_ReaderHistoryEntry> _history = [];
+
+  /// Pending coalesced progress report, if any.
+  Timer? _reportTimer;
+
+  /// Every `id` in the current chapter, in document order. Used to report the
+  /// first anchor visible in the viewport.
+  List<String> _anchorIds = const [];
 
   /// A chapter swap moves the scroll position programmatically. Ignore edge
   /// crossings for a moment afterwards so a restored end-of-chapter position
@@ -125,6 +134,7 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
   @override
   void dispose() {
     widget.controller.detach(this);
+    _reportTimer?.cancel();
     _ticker.dispose();
     _scroll.dispose();
     super.dispose();
@@ -161,6 +171,12 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
       _chapterIndex = index;
       _content = content;
       _anchorKey = GlobalKey();
+      _anchorIds = RegExp(r'''\sid=["']([^"']+)["']''')
+          .allMatches(content.bodyHtml)
+          .map((match) => match.group(1)!)
+          .where((id) => id.isNotEmpty && id != '[[No ID]]')
+          .toSet()
+          .toList();
     });
     widget.callbacks.onChapterChanged?.call(index);
     _restoring = true;
@@ -276,7 +292,24 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
     }
   }
 
+  /// Scroll produces dozens of notifications per second. Coalesce them into
+  /// one report per [Duration(milliseconds: 120)] so the chrome's setState
+  /// does not run on every pixel, while still delivering the final position.
   void _report({bool force = false}) {
+    if (force) {
+      _reportTimer?.cancel();
+      _reportTimer = null;
+      _emitReport();
+      return;
+    }
+    if (_reportTimer != null) return;
+    _reportTimer = Timer(const Duration(milliseconds: 120), () {
+      _reportTimer = null;
+      if (mounted) _emitReport();
+    });
+  }
+
+  void _emitReport() {
     if (!_scroll.hasClients) return;
     final position = _scroll.position;
     final max = position.maxScrollExtent;
@@ -285,20 +318,34 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
     final pages = ((max + viewport) / viewport).ceil().clamp(1, 100000);
     final page = (position.pixels / viewport).floor() + 1;
     widget.callbacks.onPage?.call(page.clamp(1, pages), pages);
-    final now = DateTime.now().millisecondsSinceEpoch;
-    if (!force && now - _lastReport < 120) return;
-    _lastReport = now;
     widget.callbacks.onProgress?.call(
       ReaderProgressEvent(
         chapterIndex: _chapterIndex,
         progress: progress,
         page: page.clamp(1, pages),
         pages: pages,
+        element: _visibleAnchorId(),
       ),
     );
   }
 
-  int _lastReport = 0;
+  /// The first anchor whose box is visible in the reader viewport.
+  String? _visibleAnchorId() {
+    if (_anchorIds.isEmpty) return null;
+    final reader = context.findRenderObject() as RenderBox?;
+    if (reader == null || !reader.hasSize) return null;
+    final top = reader.localToGlobal(Offset.zero).dy;
+    final bottom = top + reader.size.height;
+    for (final id in _anchorIds) {
+      final anchor = AnchorKey.forId(_anchorKey, id)?.currentContext;
+      final box = anchor?.findRenderObject() as RenderBox?;
+      if (box == null || !box.attached || !box.hasSize) continue;
+      final anchorTop = box.localToGlobal(Offset.zero).dy;
+      if (anchorTop >= bottom) break;
+      if (anchorTop + box.size.height > top + 2) return id;
+    }
+    return null;
+  }
 
   void _onTick(Duration elapsed) {
     if (!_autoRunning || !_scroll.hasClients) return;
@@ -391,6 +438,7 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
       _ReaderHistoryEntry(
         chapterIndex: _chapterIndex,
         progress: _currentProgress,
+        element: _visibleAnchorId(),
       ),
     );
     if (_history.length > 50) _history.removeAt(0);
@@ -402,7 +450,11 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
     if (_history.isEmpty) return;
     final entry = _history.removeLast();
     widget.callbacks.onHistoryChanged?.call(_history.isNotEmpty);
-    await _load(entry.chapterIndex, progress: entry.progress);
+    await _load(
+      entry.chapterIndex,
+      progress: entry.progress,
+      element: entry.element,
+    );
   }
 
   @override
@@ -522,6 +574,16 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
                   }
                   final file = File(uri.toFilePath());
                   if (!file.existsSync()) return const SizedBox.shrink();
+                  if (p.extension(file.path).toLowerCase() == '.svg') {
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      child: SvgPicture.file(
+                        file,
+                        fit: BoxFit.contain,
+                        placeholderBuilder: (_) => const SizedBox.shrink(),
+                      ),
+                    );
+                  }
                   return Padding(
                     padding: const EdgeInsets.symmetric(vertical: 6),
                     child: Image.file(
@@ -571,8 +633,10 @@ class _ReaderHistoryEntry {
   const _ReaderHistoryEntry({
     required this.chapterIndex,
     required this.progress,
+    this.element,
   });
 
   final int chapterIndex;
   final double progress;
+  final String? element;
 }
