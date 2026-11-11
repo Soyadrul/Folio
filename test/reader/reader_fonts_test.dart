@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:folio/reader/reader_fonts.dart';
@@ -59,5 +61,29 @@ void main() {
     expect(unknown, contains('serif'));
 
     expect(readerFontStack(''), contains('serif'));
+  });
+
+  test('the Linux reader families ship an offline TTF', () {
+    for (final family in kAvailableFonts) {
+      final file = File('assets/google_fonts/$family-Regular.ttf');
+      expect(file.existsSync(), isTrue, reason: file.path);
+      expect(file.lengthSync(), greaterThan(10000), reason: file.path);
+    }
+  });
+
+  test('the app-chrome weights used by the theme are bundled', () {
+    for (final name in [
+      'Lato-Regular',
+      'Lato-Bold',
+      'Lato-Italic',
+      'Playfair Display-Regular',
+      'Playfair Display-SemiBold',
+      'Playfair Display-Bold',
+      'Playfair Display-Italic',
+    ]) {
+      final file = File('assets/google_fonts/$name.ttf');
+      expect(file.existsSync(), isTrue, reason: file.path);
+      expect(file.lengthSync(), greaterThan(10000), reason: file.path);
+    }
   });
 }

@@ -66,4 +66,38 @@ void main() {
     );
     expect(workflow, contains('exit 1'));
   });
+
+  test('the release manifest does not request INTERNET', () {
+    final manifest = File(
+      'android/app/src/main/AndroidManifest.xml',
+    ).readAsStringSync();
+    expect(manifest, isNot(contains('android.permission.INTERNET')));
+
+    // Debug/profile builds still need the permission for hot reload.
+    for (final path in [
+      'android/app/src/debug/AndroidManifest.xml',
+      'android/app/src/profile/AndroidManifest.xml',
+    ]) {
+      expect(
+        File(path).readAsStringSync(),
+        contains('android.permission.INTERNET'),
+      );
+    }
+  });
+
+  test('runtime font fetching is disabled before the first frame', () {
+    final source = File('lib/main.dart').readAsStringSync();
+    expect(
+      source,
+      contains('GoogleFonts.config.allowRuntimeFetching = false;'),
+    );
+    expect(
+      source.indexOf('allowRuntimeFetching = false'),
+      lessThan(source.indexOf('runApp(')),
+    );
+    expect(
+      File('pubspec.yaml').readAsStringSync(),
+      contains('- assets/google_fonts/'),
+    );
+  });
 }

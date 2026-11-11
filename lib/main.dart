@@ -19,6 +19,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -34,6 +35,10 @@ import 'utils/theme_utils.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // The app is offline-first: every font it uses ships in assets. A missing
+  // asset is a build error the tests catch, not a reason to call Google.
+  GoogleFonts.config.allowRuntimeFetching = false;
 
   // Allow portrait and landscape. The reader reflows when the device rotates.
   await SystemChrome.setPreferredOrientations([
