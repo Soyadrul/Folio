@@ -1,9 +1,11 @@
 # Bundled reader fonts
 
 These WOFF2 files were downloaded from Google Fonts (fonts.google.com) so the
-reader's font-family setting also applies inside the chapter WebView. Regular,
-bold and italic latin subsets are bundled; variable fonts are stored once and
-declared with a `400 700` weight range.
+reader's font-family setting also applies inside the chapter WebView. Latin and
+Latin-ext subsets are bundled for regular, bold and italic text; variable fonts
+are stored once and declared with a `400 700` weight range. Each subset is
+declared with its `unicode-range`, so the browser selects the face that covers
+the characters in the chapter.
 
 | Family | Source | License |
 | --- | --- | --- |

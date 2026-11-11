@@ -86,4 +86,28 @@ void main() {
       expect(file.lengthSync(), greaterThan(10000), reason: file.path);
     }
   });
+
+  test('every reader family ships a latin-ext face', () {
+    for (final family in kAvailableFonts) {
+      final faces = kReaderFontFaces[family]!;
+      expect(
+        faces.where(
+          (face) => face.unicodeRange?.contains('U+0100') ?? false,
+        ),
+        isNotEmpty,
+        reason: '$family has no latin-ext face',
+      );
+    }
+  });
+
+  test('font face CSS carries unicode ranges for both subsets', () async {
+    final css = await readerFontFaceCss('Lora');
+
+    expect(css, contains('unicode-range:U+0000'));
+    expect(css, contains('unicode-range:U+0100'));
+    expect(
+      RegExp('unicode-range:U\\+0100').allMatches(css).length,
+      greaterThanOrEqualTo(2),
+    );
+  });
 }
