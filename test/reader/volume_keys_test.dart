@@ -50,4 +50,59 @@ void main() {
     VolumeKeys.dispatchForTest(VolumeKey.down);
     expect(received.length, 2);
   });
+
+  group('ownership', () {
+    setUp(VolumeKeys.clearHandlersForTest);
+    tearDown(VolumeKeys.clearHandlersForTest);
+
+    test('the topmost handler decides whether the keys are enabled', () {
+      void first(VolumeKey _) {}
+      void second(VolumeKey _) {}
+
+      VolumeKeys.pushHandler(first);
+      VolumeKeys.setDesired(first, true);
+      expect(VolumeKeys.debugEnabled, isTrue);
+
+      VolumeKeys.pushHandler(second);
+      VolumeKeys.setDesired(second, true);
+      expect(VolumeKeys.debugEnabled, isTrue);
+
+      VolumeKeys.removeHandler(second);
+      expect(
+        VolumeKeys.debugEnabled,
+        isTrue,
+        reason: 'the reader below still wants the keys',
+      );
+
+      VolumeKeys.removeHandler(first);
+      expect(VolumeKeys.debugEnabled, isFalse);
+    });
+
+    test('a disabled top handler hides the one below until it closes', () {
+      void first(VolumeKey _) {}
+      void second(VolumeKey _) {}
+
+      VolumeKeys.pushHandler(first);
+      VolumeKeys.setDesired(first, true);
+      VolumeKeys.pushHandler(second);
+
+      VolumeKeys.setDesired(second, false);
+      expect(VolumeKeys.debugEnabled, isFalse);
+
+      VolumeKeys.removeHandler(second);
+      expect(VolumeKeys.debugEnabled, isTrue);
+    });
+
+    test('setDesired for an unregistered handler is ignored', () {
+      VolumeKeys.setDesired((_) {}, true);
+      expect(VolumeKeys.debugEnabled, isFalse);
+      expect(VolumeKeys.debugWanted, isFalse);
+    });
+
+    test('dispatch with no handler does not throw', () {
+      expect(VolumeKeys.debugHandlers, isEmpty);
+      VolumeKeys.dispatchForTest(VolumeKey.down);
+      expect(VolumeKeys.debugEnabled, isFalse);
+    });
+  });
 }

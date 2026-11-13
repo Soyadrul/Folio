@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart' show visibleForTesting;
@@ -31,7 +32,61 @@ class VolumeKeys {
 
   static bool get supported => Platform.isAndroid;
 
+  static final Map<void Function(VolumeKey), bool> _handlers = {};
+  static bool _installed = false;
+
+  /// What the platform was last told. Tracked on every platform so tests can
+  /// assert the decision even where the channel is a no-op.
+  static bool _platformEnabled = false;
+
+  /// Temporary bridge for the code that still toggles the keys directly.
+  ///
+  /// [ReaderScreen] moves to [setDesired] in the next task; until then this
+  /// keeps the existing wiring working while the registry is introduced.
   static Future<void> setEnabled(bool enabled) async {
+    _platformEnabled = enabled;
+    await _sendEnabled(enabled);
+  }
+
+  /// Registers [handler] as the newest owner of the volume keys.
+  ///
+  /// A second reader pushed on top of the first (an EPUB opened from another
+  /// app) becomes the owner; removing it restores the reader below instead of
+  /// leaving the keys handled by nobody.
+  static void pushHandler(void Function(VolumeKey) handler) {
+    _handlers[handler] = false;
+    _install();
+    _apply();
+  }
+
+  /// Records whether [handler] wants the keys while it is on top.
+  ///
+  /// Only the newest handler's value reaches the platform, so a reader below a
+  /// settings screen or another reader cannot re-enable them.
+  static void setDesired(void Function(VolumeKey) handler, bool enabled) {
+    if (!_handlers.containsKey(handler)) return;
+    if (_handlers[handler] == enabled) return;
+    _handlers[handler] = enabled;
+    _apply();
+  }
+
+  static void removeHandler(void Function(VolumeKey) handler) {
+    if (_handlers.remove(handler) == null) return;
+    if (_handlers.isEmpty) {
+      _installed = false;
+      if (supported) _channel.setMethodCallHandler(null);
+    }
+    _apply();
+  }
+
+  static void _apply() {
+    final wanted = _handlers.isEmpty ? false : _handlers.values.last;
+    if (wanted == _platformEnabled) return;
+    _platformEnabled = wanted;
+    unawaited(_sendEnabled(wanted));
+  }
+
+  static Future<void> _sendEnabled(bool enabled) async {
     if (!supported) return;
     try {
       await _channel.invokeMethod<void>('setEnabled', enabled);
@@ -42,32 +97,11 @@ class VolumeKeys {
     }
   }
 
-  static final List<void Function(VolumeKey)> _handlers = [];
-  static bool _installed = false;
-
-  /// Registers [handler] as the current owner of the volume keys.
-  ///
-  /// A second reader pushed on top of the first (an EPUB opened from another
-  /// app) becomes the owner; removing it restores the reader below instead of
-  /// leaving the keys handled by nobody.
-  static void pushHandler(void Function(VolumeKey) handler) {
-    _handlers.add(handler);
-    _install();
-  }
-
-  static void removeHandler(void Function(VolumeKey) handler) {
-    _handlers.remove(handler);
-    if (_handlers.isEmpty) {
-      _installed = false;
-      if (supported) _channel.setMethodCallHandler(null);
-    }
-  }
-
   static void _install() {
     if (!supported || _installed) return;
     _installed = true;
     _channel.setMethodCallHandler((call) async {
-      final handler = _handlers.isEmpty ? null : _handlers.last;
+      final handler = _handlers.isEmpty ? null : _handlers.keys.last;
       if (handler == null) return null;
       switch (call.method) {
         case 'volumeUp':
@@ -83,16 +117,24 @@ class VolumeKeys {
 
   @visibleForTesting
   static List<void Function(VolumeKey)> get debugHandlers =>
-      List.unmodifiable(_handlers);
+      List.unmodifiable(_handlers.keys);
+
+  @visibleForTesting
+  static bool get debugEnabled => _platformEnabled;
+
+  @visibleForTesting
+  static bool get debugWanted =>
+      _handlers.isEmpty ? false : _handlers.values.last;
 
   @visibleForTesting
   static void clearHandlersForTest() {
     _handlers.clear();
     _installed = false;
+    _platformEnabled = false;
   }
 
   @visibleForTesting
   static void dispatchForTest(VolumeKey key) {
-    if (_handlers.isNotEmpty) _handlers.last(key);
+    if (_handlers.isNotEmpty) _handlers.keys.last(key);
   }
 }
