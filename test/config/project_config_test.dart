@@ -118,7 +118,7 @@ void main() {
     final readme = File('README.md').readAsStringSync();
     expect(readme, isNot(contains('4 display modes')));
     expect(readme, contains('3 display modes'));
-    expect(readme, contains('Book (paginated, Android)'));
-    expect(readme, contains('Scroll (continuous, Android + Linux)'));
+    expect(readme, contains('**Book** (CSS-paginated, Android)'));
+    expect(readme, contains('**Scroll** (Android + Linux)'));
   });
 }
