@@ -329,12 +329,8 @@ class EpubLoader {
 
     await _touchAccess(dir);
 
-    final container = await _findAndParseContainer(dir);
-    return _parse(
-      filePath: absolute,
-      cacheDir: dir.path,
-      opfPath: container.opfPath,
-      files: container.files,
+    return _isolateRunner(
+      () => _openExtracted(filePath: absolute, cacheDir: dir.path),
     );
   }
 
@@ -533,7 +529,7 @@ class EpubLoader {
     return name;
   }
 
-  Future<List<String>> _listFiles(Directory dir) async {
+  static Future<List<String>> _listFiles(Directory dir) async {
     final files = <String>[];
     await for (final entity in dir.list(recursive: true, followLinks: false)) {
       if (entity is! File) continue;
@@ -544,7 +540,23 @@ class EpubLoader {
     return files;
   }
 
-  Future<({String opfPath, List<String> files})> _findAndParseContainer(
+  /// Resolves the container and parses the package document for an extracted
+  /// book. Runs inside an isolate; only the returned [EpubDocument] crosses
+  /// the boundary.
+  static Future<EpubDocument> _openExtracted({
+    required String filePath,
+    required String cacheDir,
+  }) async {
+    final container = await _findAndParseContainer(Directory(cacheDir));
+    return _parse(
+      filePath: filePath,
+      cacheDir: cacheDir,
+      opfPath: container.opfPath,
+      files: container.files,
+    );
+  }
+
+  static Future<({String opfPath, List<String> files})> _findAndParseContainer(
     Directory dir,
   ) async {
     final files = await _listFiles(dir);
@@ -590,7 +602,7 @@ class EpubLoader {
     );
   }
 
-  Future<EpubDocument> _parse({
+  static Future<EpubDocument> _parse({
     required String filePath,
     required String cacheDir,
     required String opfPath,
@@ -818,7 +830,7 @@ class EpubLoader {
     );
   }
 
-  Future<List<EpubTocEntry>> _parseToc({
+  static Future<List<EpubTocEntry>> _parseToc({
     required XmlElement? metadata,
     required Map<String, _ManifestItem> manifestItems,
     required List<EpubChapter> chapters,
@@ -955,7 +967,7 @@ class EpubLoader {
     return decodeEpubText(await file.readAsBytes());
   }
 
-  Future<String> _chapterTitle(String path, {String? bookTitle}) async {
+  static Future<String> _chapterTitle(String path, {String? bookTitle}) async {
     try {
       final file = File(path);
       final length = await file.length();
@@ -973,7 +985,7 @@ class EpubLoader {
     return '';
   }
 
-  Future<String?> _resolveCover({
+  static Future<String?> _resolveCover({
     required XmlElement? metadata,
     required Map<String, _ManifestItem> manifestItems,
     required String? tocId,
@@ -1046,7 +1058,7 @@ class EpubLoader {
     return existing(image);
   }
 
-  Future<String?> _firstImageIn(
+  static Future<String?> _firstImageIn(
     String relPath,
     String cacheDir,
     HrefResolver resolver,

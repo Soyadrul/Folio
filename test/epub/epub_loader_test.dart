@@ -476,21 +476,43 @@ void main() {
     expect(Directory(secondBook.cacheDir).existsSync(), isFalse);
   });
 
-  test('opening a new book extracts through the isolate runner', () async {
-    final runs = <String>[];
-    final file = await EpubFixture.write(tmp, epub2Entries());
+  test(
+    'opening a new book extracts and parses through the isolate runner',
+    () async {
+      final runs = <String>[];
+      final file = await EpubFixture.write(tmp, epub2Entries());
 
-    final book = await EpubLoader(
-      cacheRoot: cache,
-      isolateRunner: <T>(Future<T> Function() computation) {
-        runs.add('run');
-        return Isolate.run(computation);
-      },
-    ).load(file.path);
+      final book = await EpubLoader(
+        cacheRoot: cache,
+        isolateRunner: <T>(Future<T> Function() computation) {
+          runs.add('run');
+          return Isolate.run(computation);
+        },
+      ).load(file.path);
 
-    expect(book.title, 'Old Book');
-    expect(runs, hasLength(1), reason: 'extraction runs off the UI isolate');
-  });
+      expect(book.title, 'Old Book');
+      expect(runs, hasLength(2), reason: 'extraction and parsing');
+    },
+  );
+
+  test(
+    'reopening a cached book only parses through the isolate runner',
+    () async {
+      final file = await EpubFixture.write(tmp, epub2Entries());
+      await loader().load(file.path);
+
+      final runs = <String>[];
+      await EpubLoader(
+        cacheRoot: cache,
+        isolateRunner: <T>(Future<T> Function() computation) {
+          runs.add('run');
+          return Isolate.run(computation);
+        },
+      ).load(file.path);
+
+      expect(runs, hasLength(1), reason: 'no extraction, parse only');
+    },
+  );
 
   test('streams a large entry out byte for byte', () async {
     final payload = List<int>.generate(4 * 1024 * 1024, (index) => index % 251);
