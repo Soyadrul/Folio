@@ -17,17 +17,6 @@ class KeepScreenOn {
 
   static bool get supported => Platform.isAndroid;
 
-  /// Temporary bridge for the code that still toggles the screen directly.
-  ///
-  /// [ReaderScreen] moves to [acquire] in the next task; until then this keeps
-  /// the existing wiring working while the registry is introduced.
-  static Future<void> setEnabled(bool enabled) async {
-    if (enabled == _platformEnabled) return;
-    _platformEnabled = enabled;
-    if (!supported) return;
-    await _send(enabled);
-  }
-
   /// Registers a reader that wants the screen kept awake and what it wants.
   static void acquire(Object owner, {bool enabled = false}) {
     _owners[owner] = enabled;

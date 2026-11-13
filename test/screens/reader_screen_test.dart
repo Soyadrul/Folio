@@ -9,9 +9,13 @@ import 'package:folio/epub/epub.dart';
 import 'package:folio/models/app_settings.dart';
 import 'package:folio/models/book.dart';
 import 'package:folio/providers/settings_provider.dart';
+import 'package:folio/reader/keep_screen_on.dart';
+import 'package:folio/reader/reader_system_ui.dart';
 import 'package:folio/reader/reading_position.dart';
+import 'package:folio/reader/volume_keys.dart';
 import 'package:folio/reader/webview_reader.dart';
 import 'package:folio/screens/reader_screen.dart';
+import 'package:folio/screens/settings_screen.dart';
 import 'package:folio/utils/theme_utils.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -33,6 +37,9 @@ void main() {
     previousHttpOverrides = HttpOverrides.current;
     HttpOverrides.global = _PendingHttpOverrides();
     SharedPreferences.setMockInitialValues({});
+    VolumeKeys.clearHandlersForTest();
+    KeepScreenOn.resetForTest();
+    ReaderSystemUi.resetForTest();
     tmp = await Directory.systemTemp.createTemp('folio_reader_screen_test_');
     epub = await EpubFixture.write(tmp, epubEntries());
   });
@@ -301,6 +308,128 @@ void main() {
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
+  });
+
+  testWidgets('volume keys are released while Settings is open', (
+    tester,
+  ) async {
+    final book = Book(path: epub.path, title: 'Old Book', author: 'Jane Doe');
+    final loader = EpubLoader(cacheRoot: Directory(p.join(tmp.path, 'cache')));
+
+    await tester.runAsync(() async {
+      await tester.pumpWidget(
+        ProviderScope(
+          child: MaterialApp(
+            theme: buildLightTheme(),
+            home: ReaderScreen(book: book, loader: loader),
+          ),
+        ),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 1500));
+    });
+    await tester.pump();
+    expect(VolumeKeys.debugEnabled, isTrue);
+
+    await tester.tap(find.byIcon(Icons.settings_outlined));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byType(SettingsScreen), findsOneWidget);
+    expect(VolumeKeys.debugEnabled, isFalse);
+
+    // A setting changed inside Settings fires the same listener that would
+    // normally re-enable the keys on the hidden reader.
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(SettingsScreen)),
+    );
+    await tester.runAsync(() async {
+      await container
+          .read(settingsNotifierProvider.notifier)
+          .update((s) => s.copyWith(keepScreenOn: false));
+    });
+    await tester.pump();
+    expect(VolumeKeys.debugEnabled, isFalse);
+
+    Navigator.of(tester.element(find.byType(SettingsScreen))).pop();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump();
+    expect(find.byType(SettingsScreen), findsNothing);
+    expect(VolumeKeys.debugEnabled, isTrue);
+  });
+
+  testWidgets('closing a stacked reader keeps the one below working', (
+    tester,
+  ) async {
+    late File secondEpub;
+    await tester.runAsync(() async {
+      secondEpub = await EpubFixture.write(
+        tmp,
+        epub2Entries(),
+        name: 'second.epub',
+      );
+    });
+    final first = Book(path: epub.path, title: 'Old Book', author: 'Jane Doe');
+    final second = Book(
+      path: secondEpub.path,
+      title: 'Second Book',
+      author: 'Jane Doe',
+    );
+    final loader = EpubLoader(cacheRoot: Directory(p.join(tmp.path, 'cache')));
+
+    await tester.runAsync(() async {
+      await tester.pumpWidget(
+        ProviderScope(
+          child: MaterialApp(
+            theme: buildLightTheme(),
+            home: ReaderScreen(book: first, loader: loader),
+          ),
+        ),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 1500));
+    });
+    await tester.pump();
+    expect(VolumeKeys.debugEnabled, isTrue);
+    expect(ReaderSystemUi.debugReaders, 1);
+
+    final navigator = tester.state<NavigatorState>(find.byType(Navigator));
+    unawaited(
+      navigator.push(
+        MaterialPageRoute<void>(
+          builder: (_) => ReaderScreen(book: second, loader: loader),
+        ),
+      ),
+    );
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 1500));
+    });
+    await tester.pump();
+    expect(ReaderSystemUi.debugReaders, 2);
+
+    navigator.pop();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(ReaderSystemUi.debugReaders, 1);
+    expect(
+      VolumeKeys.debugEnabled,
+      isTrue,
+      reason: 'the first reader must get its keys back',
+    );
+    expect(
+      KeepScreenOn.debugWanted,
+      isTrue,
+      reason: 'the first reader still wants the screen awake',
+    );
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(ReaderSystemUi.debugReaders, 0);
+    expect(VolumeKeys.debugEnabled, isFalse);
+    expect(KeepScreenOn.debugWanted, isFalse);
   });
 }
 

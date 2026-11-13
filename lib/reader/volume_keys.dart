@@ -39,15 +39,6 @@ class VolumeKeys {
   /// assert the decision even where the channel is a no-op.
   static bool _platformEnabled = false;
 
-  /// Temporary bridge for the code that still toggles the keys directly.
-  ///
-  /// [ReaderScreen] moves to [setDesired] in the next task; until then this
-  /// keeps the existing wiring working while the registry is introduced.
-  static Future<void> setEnabled(bool enabled) async {
-    _platformEnabled = enabled;
-    await _sendEnabled(enabled);
-  }
-
   /// Registers [handler] as the newest owner of the volume keys.
   ///
   /// A second reader pushed on top of the first (an EPUB opened from another

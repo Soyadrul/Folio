@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -14,6 +13,7 @@ import '../providers/settings_provider.dart';
 import '../reader/flutter_reader.dart';
 import '../reader/keep_screen_on.dart';
 import '../reader/reader_content_controller.dart';
+import '../reader/reader_system_ui.dart';
 import '../reader/reading_position.dart';
 import '../reader/volume_keys.dart';
 import '../reader/webview_reader.dart';
@@ -66,7 +66,7 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
 
   bool _autoRunning = false;
   int _autoSpeed = 40;
-  bool _volumeKeysEnabled = false;
+  bool _settingsOpen = false;
 
   Timer? _saveTimer;
   Timer? _runtimeErrorTimer;
@@ -89,11 +89,11 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
     );
     _fadeAnimation = CurvedAnimation(parent: _fade, curve: Curves.easeOut);
     _fade.value = 1;
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    ReaderSystemUi.enter();
     VolumeKeys.pushHandler(_onVolumeKey);
     final settings = ref.read(settingsNotifierProvider);
     _syncVolumeKeys(settings);
-    KeepScreenOn.setEnabled(settings.keepScreenOn);
+    KeepScreenOn.acquire(this, enabled: settings.keepScreenOn);
     _openBook();
   }
 
@@ -107,10 +107,9 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
     unawaited(_settingsNotifier.flush());
     _persistPosition(force: true);
     VolumeKeys.removeHandler(_onVolumeKey);
-    if (_volumeKeysEnabled) VolumeKeys.setEnabled(false);
-    KeepScreenOn.setEnabled(false);
+    KeepScreenOn.release(this);
     _fade.dispose();
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    ReaderSystemUi.leave();
     super.dispose();
   }
 
@@ -132,13 +131,12 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
 
   void _syncVolumeKeys(AppSettings settings) {
     final wanted =
+        !_settingsOpen &&
         _document != null &&
         (settings.readerMode == ReaderMode.book
             ? settings.volumeButtonsTurnPages
             : settings.volumeButtonsChangeSpeed);
-    if (wanted == _volumeKeysEnabled) return;
-    _volumeKeysEnabled = wanted;
-    VolumeKeys.setEnabled(wanted);
+    VolumeKeys.setDesired(_onVolumeKey, wanted);
   }
 
   void _onVolumeKey(VolumeKey key) {
@@ -224,11 +222,14 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
 
   Future<void> _openSettings() async {
     _content.pauseAutoScroll();
+    _settingsOpen = true;
+    _syncVolumeKeys(ref.read(settingsNotifierProvider));
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => SettingsScreen(keepBookPath: widget.book.path),
       ),
     );
+    _settingsOpen = false;
     if (mounted) _syncVolumeKeys(ref.read(settingsNotifierProvider));
   }
 
@@ -351,7 +352,7 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
     final settings = ref.watch(settingsNotifierProvider);
     ref.listen<AppSettings>(settingsNotifierProvider, (_, next) {
       _syncVolumeKeys(next);
-      KeepScreenOn.setEnabled(next.keepScreenOn);
+      KeepScreenOn.update(this, next.keepScreenOn);
     });
     final brightness = MediaQuery.of(context).platformBrightness;
     final background = readerBackground(settings.readingMode, brightness);
