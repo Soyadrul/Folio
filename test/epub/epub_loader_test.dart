@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:folio/epub/epub.dart';
@@ -424,38 +425,43 @@ void main() {
     });
   });
 
-  test('re-extraction keeps the previous folder until the new one is ready', () async {
-    final file = await EpubFixture.write(tmp, epub2Entries());
-    await loader().load(file.path);
+  test(
+    're-extraction keeps the previous folder until the new one is ready',
+    () async {
+      final file = await EpubFixture.write(tmp, epub2Entries());
+      await loader().load(file.path);
 
-    Directory? previousSeen;
-    final replacing = EpubLoader(
-      cacheRoot: cache,
-      beforeReplace: (previous, fresh) async {
-        previousSeen = previous;
-        expect(await previous.exists(), isTrue);
-        expect(
-          await File(
-            p.join(previous.path, 'META-INF', 'container.xml'),
-          ).exists(),
-          isTrue,
-        );
-      },
-    );
+      Directory? previousSeen;
+      final replacing = EpubLoader(
+        cacheRoot: cache,
+        beforeReplace: (previous, fresh) async {
+          previousSeen = previous;
+          expect(await previous.exists(), isTrue);
+          expect(
+            await File(
+              p.join(previous.path, 'META-INF', 'container.xml'),
+            ).exists(),
+            isTrue,
+          );
+        },
+      );
 
-    await Future<void>.delayed(const Duration(milliseconds: 20));
-    await file.setLastModified(DateTime.now().add(const Duration(seconds: 2)));
-    await replacing.load(file.path);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      await file.setLastModified(
+        DateTime.now().add(const Duration(seconds: 2)),
+      );
+      await replacing.load(file.path);
 
-    expect(previousSeen, isNotNull);
-    expect(
-      cache.listSync().whereType<Directory>().where(
-        (dir) => dir.path.contains('.old-'),
-      ),
-      isEmpty,
-      reason: 'the replaced folder is deleted after the rename',
-    );
-  });
+      expect(previousSeen, isNotNull);
+      expect(
+        cache.listSync().whereType<Directory>().where(
+          (dir) => dir.path.contains('.old-'),
+        ),
+        isEmpty,
+        reason: 'the replaced folder is deleted after the rename',
+      );
+    },
+  );
 
   test('clearCache keeps the book that is currently open', () async {
     final first = await EpubFixture.write(tmp, epub2Entries(), name: 'a.epub');
@@ -468,5 +474,42 @@ void main() {
 
     expect(Directory(firstBook.cacheDir).existsSync(), isTrue);
     expect(Directory(secondBook.cacheDir).existsSync(), isFalse);
+  });
+
+  test('opening a new book extracts through the isolate runner', () async {
+    final runs = <String>[];
+    final file = await EpubFixture.write(tmp, epub2Entries());
+
+    final book = await EpubLoader(
+      cacheRoot: cache,
+      isolateRunner: <T>(Future<T> Function() computation) {
+        runs.add('run');
+        return Isolate.run(computation);
+      },
+    ).load(file.path);
+
+    expect(book.title, 'Old Book');
+    expect(runs, hasLength(1), reason: 'extraction runs off the UI isolate');
+  });
+
+  test('streams a large entry out byte for byte', () async {
+    final payload = List<int>.generate(4 * 1024 * 1024, (index) => index % 251);
+    final file = await EpubFixture.write(tmp, {
+      ...epub2Entries(),
+      'OEBPS/images/large.bin': payload,
+    });
+
+    final book = await loader().load(file.path);
+    final extracted = File(
+      p.join(book.rootDir, 'OEBPS', 'images', 'large.bin'),
+    );
+
+    expect(await extracted.length(), payload.length);
+    final actual = await extracted.readAsBytes();
+    expect(actual.sublist(0, 1024), payload.sublist(0, 1024));
+    expect(
+      actual.sublist(actual.length - 1024),
+      payload.sublist(payload.length - 1024),
+    );
   });
 }

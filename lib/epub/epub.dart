@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
+import 'dart:isolate';
 
 import 'package:archive/archive.dart';
 import 'package:crypto/crypto.dart';
@@ -16,6 +16,17 @@ import 'epub_text.dart';
 import 'href_resolver.dart';
 
 export 'epub_text.dart' show decodeEpubText;
+
+/// Runs a computation away from the calling isolate.
+///
+/// [EpubLoader] takes one of these so tests can prove that opening and paging a
+/// book does not do the heavy work on the UI isolate.
+typedef EpubIsolateRunner =
+    Future<T> Function<T>(Future<T> Function() computation);
+
+/// The default [EpubIsolateRunner]: a short-lived isolate per call.
+Future<T> runOffIsolate<T>(Future<T> Function() computation) =>
+    Isolate.run(computation);
 
 /// Manifest `properties` is whitespace-separated by specification, but books
 /// use tabs and newlines too. Splitting on a single space made `nav` and
@@ -225,10 +236,15 @@ class EpubDocument {
 /// The cache key is the absolute file path; a sidecar file records size and
 /// modification time, so a changed book is extracted again.
 class EpubLoader {
-  EpubLoader({Directory? cacheRoot, this.beforeReplace})
-    : _cacheRoot = cacheRoot;
+  EpubLoader({
+    Directory? cacheRoot,
+    this.beforeReplace,
+    EpubIsolateRunner? isolateRunner,
+  }) : _cacheRoot = cacheRoot,
+       _isolateRunner = isolateRunner ?? runOffIsolate;
 
   final Directory? _cacheRoot;
+  final EpubIsolateRunner _isolateRunner;
   Future<Directory>? _resolvedRoot;
 
   /// Test hook that runs while the previous extraction still exists.
@@ -335,7 +351,7 @@ class EpubLoader {
     );
     try {
       await temp.create(recursive: true);
-      await _extract(file, temp);
+      await _isolateRunner(() => _extractArchive(file.path, temp.path));
       await File(p.join(temp.path, '.folio-cache.json')).writeAsString(
         jsonEncode({
           'path': absolute,
@@ -444,45 +460,63 @@ class EpubLoader {
     }
   }
 
-  Future<Uint8List> _readEpubBytes(File file) async {
-    try {
-      return await file.readAsBytes();
-    } on FileSystemException catch (e) {
-      throw EpubException('Cannot read the book: ${e.message}');
-    }
-  }
-
   static const _maxExtractEntries = 20000;
   static const _maxExtractBytes = 2 * 1024 * 1024 * 1024;
 
-  Future<void> _extract(File file, Directory target) async {
-    final bytes = await _readEpubBytes(file);
+  /// Extracts [epubPath] into [targetPath], one entry at a time.
+  ///
+  /// Runs inside an isolate: the archive file and each entry are streamed, so
+  /// only one entry is held in memory at a time. Entry names go through
+  /// [_safeEntryPath] exactly as before.
+  static Future<void> _extractArchive(
+    String epubPath,
+    String targetPath,
+  ) async {
+    final InputFileStream input;
+    try {
+      input = InputFileStream(epubPath);
+    } on FileSystemException catch (e) {
+      throw EpubException('Cannot read the book: ${e.message}');
+    } catch (e) {
+      throw EpubException('Cannot read the book: $e');
+    }
+
     final Archive archive;
     try {
-      archive = ZipDecoder().decodeBytes(bytes);
+      archive = ZipDecoder().decodeStream(input);
     } catch (e) {
+      await input.close();
       throw EpubException('This book is damaged or is not an EPUB: $e');
     }
 
-    var extracted = 0;
-    var entries = 0;
-    for (final entry in archive.files) {
-      if (!entry.isFile) continue;
-      entries++;
-      if (entries > _maxExtractEntries) {
-        throw EpubException(
-          'This book contains too many files to open safely.',
-        );
+    try {
+      var extracted = 0;
+      var entries = 0;
+      for (final entry in archive.files) {
+        if (!entry.isFile) continue;
+        entries++;
+        if (entries > _maxExtractEntries) {
+          throw EpubException(
+            'This book contains too many files to open safely.',
+          );
+        }
+        extracted += entry.size;
+        if (extracted > _maxExtractBytes) {
+          throw EpubException('This book is too large to extract safely.');
+        }
+        final safe = _safeEntryPath(entry.name);
+        if (safe == null) continue;
+        final output = File(p.joinAll([targetPath, ...safe.split('/')]));
+        await output.parent.create(recursive: true);
+        final stream = OutputFileStream(output.path);
+        try {
+          entry.writeContent(stream);
+        } finally {
+          await stream.close();
+        }
       }
-      extracted += entry.size;
-      if (extracted > _maxExtractBytes) {
-        throw EpubException('This book is too large to extract safely.');
-      }
-      final safe = _safeEntryPath(entry.name);
-      if (safe == null) continue;
-      final output = File(p.joinAll([target.path, ...safe.split('/')]));
-      await output.parent.create(recursive: true);
-      await output.writeAsBytes(entry.readBytes() ?? const [], flush: false);
+    } finally {
+      await input.close();
     }
   }
 
