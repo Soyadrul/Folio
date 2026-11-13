@@ -495,6 +495,29 @@ void main() {
     },
   );
 
+  test('chapter preparation runs through the isolate runner', () async {
+    final runs = <String>[];
+    final file = await EpubFixture.write(tmp, epub2Entries());
+    final book = await EpubLoader(
+      cacheRoot: cache,
+      isolateRunner: <T>(Future<T> Function() computation) {
+        runs.add('run');
+        return Isolate.run(computation);
+      },
+    ).load(file.path);
+    runs.clear();
+
+    final content = await book.loadChapterContent(book.chapters.first);
+
+    expect(
+      runs,
+      hasLength(1),
+      reason: 'rewriting and CSS scoping are isolated',
+    );
+    expect(content.bodyHtml, contains('file://'));
+    expect(content.bodyHtml, contains('pic.jpg'));
+  });
+
   test(
     'reopening a cached book only parses through the isolate runner',
     () async {

@@ -170,6 +170,10 @@ class EpubDocument {
 
   String get rootDir => cacheDir;
 
+  /// Set by [EpubLoader] after parsing so chapter preparation uses the same
+  /// runner (tests inject one to observe the work).
+  EpubIsolateRunner? _runIsolated;
+
   /// Every openable document, in index order.
   ///
   /// Spine indexes come first and auxiliary indexes follow, so an
@@ -210,24 +214,33 @@ class EpubDocument {
   }
 
   /// Reads and rewrites [chapter] for the WebView.
-  Future<ChapterContent> loadChapterContent(EpubChapter chapter) async {
-    final bytes = await File(chapter.path).readAsBytes();
-    // Some older books are not valid UTF-8; replacement characters are much
-    // better than refusing to open the chapter.
-    final raw = decodeEpubText(bytes);
-    final content = rewriteChapterHtml(
-      raw,
-      chapterPath: chapter.relPath,
-      bookRoot: rootDir,
-      resolver: resolver,
-    );
-    return prepareChapterStyles(
-      content,
-      chapterIndex: chapter.index,
-      chapterPath: chapter.relPath,
-      bookRoot: rootDir,
-      resolver: resolver,
-    );
+  Future<ChapterContent> loadChapterContent(EpubChapter chapter) {
+    final run = _runIsolated ?? runOffIsolate;
+    final chapterPath = chapter.relPath;
+    final chapterIndex = chapter.index;
+    final filePath = chapter.path;
+    final bookRoot = rootDir;
+    final paths = resolver.files.toList(growable: false);
+    return run(() async {
+      final bytes = await File(filePath).readAsBytes();
+      // Some older books are not valid UTF-8; replacement characters are much
+      // better than refusing to open the chapter.
+      final raw = decodeEpubText(bytes);
+      final local = HrefResolver(paths);
+      final content = rewriteChapterHtml(
+        raw,
+        chapterPath: chapterPath,
+        bookRoot: bookRoot,
+        resolver: local,
+      );
+      return prepareChapterStyles(
+        content,
+        chapterIndex: chapterIndex,
+        chapterPath: chapterPath,
+        bookRoot: bookRoot,
+        resolver: local,
+      );
+    });
   }
 }
 
@@ -329,9 +342,11 @@ class EpubLoader {
 
     await _touchAccess(dir);
 
-    return _isolateRunner(
+    final document = await _isolateRunner(
       () => _openExtracted(filePath: absolute, cacheDir: dir.path),
     );
+    document._runIsolated = _isolateRunner;
+    return document;
   }
 
   /// Extracts into a sibling folder and renames it into place, so a crash or a
