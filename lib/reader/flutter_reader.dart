@@ -592,7 +592,11 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
                 builder: (imageContext) {
                   final src = imageContext.attributes['src'];
                   final uri = src == null ? null : Uri.tryParse(src);
-                  if (uri == null || uri.scheme != 'file') {
+                  if (uri == null) return const SizedBox.shrink();
+                  if (uri.scheme == 'data') {
+                    return _buildDataImage(uri);
+                  }
+                  if (uri.scheme != 'file') {
                     return const SizedBox.shrink();
                   }
                   final file = File(
@@ -626,6 +630,39 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
         ),
       ),
     );
+  }
+
+  /// Renders an inline `data:` image.
+  ///
+  /// The sanitiser deliberately keeps data URIs on images, and many converted
+  /// books embed their illustrations this way. SVG needs its own decoder.
+  Widget _buildDataImage(Uri uri) {
+    final data = uri.data;
+    if (data == null) return const SizedBox.shrink();
+    try {
+      final bytes = data.contentAsBytes();
+      if (bytes.isEmpty) return const SizedBox.shrink();
+      if (data.mimeType.toLowerCase() == 'image/svg+xml') {
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: SvgPicture.memory(
+            bytes,
+            fit: BoxFit.contain,
+            placeholderBuilder: (_) => const SizedBox.shrink(),
+          ),
+        );
+      }
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Image.memory(
+          bytes,
+          fit: BoxFit.contain,
+          errorBuilder: (_, _, _) => const SizedBox.shrink(),
+        ),
+      );
+    } on FormatException {
+      return const SizedBox.shrink();
+    }
   }
 
   void _onTapUp(TapUpDetails details) {

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -351,6 +352,51 @@ void main() {
       greaterThanOrEqualTo(dragged - 1),
       reason: 'auto-scroll must not drag the view back',
     );
+  });
+
+  testWidgets('a data: PNG image renders in the Linux reader', (tester) async {
+    const png =
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk'
+        '+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+    final document = _FakeDocument([
+      '<p>Illustrated.</p><img alt="" src="data:image/png;base64,$png"/>',
+    ]);
+
+    await _pumpReader(
+      tester,
+      _readerApp(
+        document: document,
+        controller: ReaderContentController(),
+        changes: [],
+      ),
+    );
+
+    expect(find.byType(Image), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a data: SVG image renders in the Linux reader', (tester) async {
+    final svg = base64Encode(
+      utf8.encode(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">'
+        '<rect width="10" height="10" fill="red"/></svg>',
+      ),
+    );
+    final document = _FakeDocument([
+      '<p>Vector.</p><img alt="" src="data:image/svg+xml;base64,$svg"/>',
+    ]);
+
+    await _pumpReader(
+      tester,
+      _readerApp(
+        document: document,
+        controller: ReaderContentController(),
+        changes: [],
+      ),
+    );
+
+    expect(find.byType(SvgPicture), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 }
 
