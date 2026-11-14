@@ -585,4 +585,51 @@ void main() {
       );
     });
   });
+
+  group('stripBookThemeCss', () {
+    test('drops publisher colours, backgrounds and font declarations', () {
+      final html = stripBookThemeCss(
+        '<style>body { color: #000; background: #fff; '
+        'font-family: Times; font-size: 20px; margin: 0 }</style>',
+      );
+
+      expect(html, contains('<style>'));
+      expect(html, contains('margin: 0'));
+      expect(html, isNot(contains('color')));
+      expect(html, isNot(contains('background')));
+      expect(html, isNot(contains('font-family')));
+      expect(html, isNot(contains('font-size')));
+    });
+
+    test('keeps layout rules inside nested at-rules', () {
+      final html = stripBookThemeCss(
+        '<style>@media screen { p { color: red; text-indent: 1em } }</style>',
+      );
+
+      expect(html, contains('text-indent: 1em'));
+      expect(html, isNot(contains('color: red')));
+    });
+
+    test('keeps @font-face definitions intact', () {
+      final html = stripBookThemeCss(
+        '<style>@font-face { font-family: Book; src: url(book.woff) }</style>',
+      );
+
+      expect(html, contains('font-family: Book'));
+      expect(html, contains('src: url(book.woff)'));
+    });
+
+    test('keeps background images and handles semicolons in url()', () {
+      final html = stripBookThemeCss(
+        '<style>p { background-image: url(data:image/svg+xml;utf8,x); '
+        'text-indent: 1em }</style>',
+      );
+
+      expect(
+        html,
+        contains('background-image: url(data:image/svg+xml;utf8,x)'),
+      );
+      expect(html, contains('text-indent: 1em'));
+    });
+  });
 }

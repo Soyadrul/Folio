@@ -569,7 +569,9 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
           ),
           child: Html(
             anchorKey: _anchorKey,
-            data: '${content.bookStyleHtml}${content.bodyHtml}',
+            data:
+                '${stripBookThemeCss(content.bookStyleHtml)}'
+                '${content.bodyHtml}',
             style: {
               'body': Style(
                 margin: Margins.zero,

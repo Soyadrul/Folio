@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_html/flutter_html.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:folio/epub/chapter_html.dart';
@@ -398,6 +399,25 @@ void main() {
     expect(find.byType(SvgPicture), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('publisher CSS cannot override the Linux theme', (tester) async {
+    final document = _FakeDocument([
+      '<p>Chapter text.</p>',
+    ], bookStyleHtml: '<style>body { color: #000; background: #fff }</style>');
+
+    await _pumpReader(
+      tester,
+      _readerApp(
+        document: document,
+        controller: ReaderContentController(),
+        changes: [],
+      ),
+    );
+
+    final html = tester.widget<Html>(find.byType(Html));
+    expect(html.data ?? '', isNot(contains('color: #000')));
+    expect(html.data ?? '', contains('Chapter text.'));
+  });
 }
 
 Widget _readerApp({
@@ -458,7 +478,7 @@ String _anchoredBody() => List.generate(
 /// An [EpubDocument] whose chapters are handed out directly, so the widget
 /// tests never depend on real file IO timing.
 class _FakeDocument extends EpubDocument {
-  _FakeDocument._(this.bodies, {this.gates})
+  _FakeDocument._(this.bodies, {this.gates, this.bookStyleHtml = ''})
     : super(
         filePath: 'fake.epub',
         cacheDir: '.',
@@ -487,10 +507,12 @@ class _FakeDocument extends EpubDocument {
   factory _FakeDocument(
     List<String> bodies, {
     Map<int, Completer<void>>? gates,
-  }) => _FakeDocument._(bodies, gates: gates);
+    String bookStyleHtml = '',
+  }) => _FakeDocument._(bodies, gates: gates, bookStyleHtml: bookStyleHtml);
 
   final List<String> bodies;
   final Map<int, Completer<void>>? gates;
+  final String bookStyleHtml;
 
   @override
   Future<ChapterContent> loadChapterContent(EpubChapter chapter) async {
@@ -499,6 +521,7 @@ class _FakeDocument extends EpubDocument {
     return ChapterContent(
       bodyHtml: bodies[chapter.index],
       headHtml: '',
+      bookStyleHtml: bookStyleHtml,
       missingResources: const [],
     );
   }

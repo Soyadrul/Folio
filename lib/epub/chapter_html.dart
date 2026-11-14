@@ -821,3 +821,94 @@ List<String> _splitTopLevel(String value, String separator) {
   parts.add(value.substring(start));
   return parts;
 }
+
+/// Declarations that would override the reader's theme.
+const _themeProperties = {
+  'color',
+  'background',
+  'background-color',
+  'font',
+  'font-family',
+  'font-size',
+};
+
+/// Removes theme-fighting publisher CSS from the `<style>` blocks in
+/// [bookStyleHtml].
+///
+/// The WebView reader neutralises these rules with the `!important` overrides
+/// in `reader.css`. The Linux fallback renders the same HTML without that
+/// stylesheet, so it drops the declarations that would otherwise force black
+/// text or a white page onto the dark and sepia themes.
+String stripBookThemeCss(String bookStyleHtml) {
+  return bookStyleHtml.replaceAllMapped(
+    RegExp(r'(<style\b[^>]*>)([\s\S]*?)(</style>)', caseSensitive: false),
+    (match) => '${match[1]}${stripThemeDeclarations(match[2]!)}${match[3]}',
+  );
+}
+
+/// Removes the declarations in [_themeProperties] from [css], keeping every
+/// other declaration, selector and at-rule. Comments are dropped because
+/// declarations are split on `;`, and a comment may contain one.
+///
+/// `@font-face` is copied verbatim: its `font-family` and `src` declarations
+/// define the font, they do not fight the theme.
+String stripThemeDeclarations(String css) {
+  final output = StringBuffer();
+  final source = css.replaceAll(RegExp(r'/\*[\s\S]*?\*/'), '');
+  var index = 0;
+  while (index < source.length) {
+    final brace = _findTopLevelChar(source, index, '{');
+    if (brace < 0) {
+      output.write(source.substring(index));
+      break;
+    }
+    final close = _findMatchingBrace(source, brace);
+    if (close < 0) {
+      output.write(source.substring(index));
+      break;
+    }
+
+    final prelude = source.substring(index, brace);
+    final body = source.substring(brace + 1, close);
+    final lower = prelude.trim().toLowerCase();
+    final atRule = lower.startsWith('@');
+    const nestedAtRules = {
+      '@media',
+      '@supports',
+      '@document',
+      '@layer',
+      '@container',
+      '@starting-style',
+    };
+    final nested =
+        atRule && nestedAtRules.contains(lower.split(RegExp(r'[\s({]')).first);
+
+    output.write(prelude);
+    output.write('{');
+    if (nested) {
+      output.write(stripThemeDeclarations(body));
+    } else if (atRule) {
+      output.write(body);
+    } else {
+      output.write(_stripThemeDeclarations(body));
+    }
+    output.write('}');
+    index = close + 1;
+  }
+  return output.toString();
+}
+
+String _stripThemeDeclarations(String body) {
+  final kept = <String>[];
+  for (final declaration in _splitTopLevel(body, ';')) {
+    final colon = _findTopLevelChar(declaration, 0, ':');
+    if (colon < 0) {
+      if (declaration.trim().isNotEmpty) kept.add(declaration);
+      continue;
+    }
+    final property = declaration.substring(0, colon).trim().toLowerCase();
+    if (_themeProperties.contains(property)) continue;
+    kept.add(declaration);
+  }
+  return kept.join(';');
+}
