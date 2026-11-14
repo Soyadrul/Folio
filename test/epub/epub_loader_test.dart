@@ -551,10 +551,10 @@ void main() {
 
     expect(await extracted.length(), payload.length);
     final actual = await extracted.readAsBytes();
-    expect(actual.sublist(0, 1024), payload.sublist(0, 1024));
     expect(
-      actual.sublist(actual.length - 1024),
-      payload.sublist(payload.length - 1024),
+      actual,
+      payload,
+      reason: 'every byte of the streamed entry must match',
     );
   });
 }

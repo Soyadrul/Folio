@@ -459,13 +459,26 @@ void main() {
     expect(find.text('One'), findsOneWidget);
 
     final state = tester.state<ReaderScreenState>(find.byType(ReaderScreen));
-    state.createCallbacks().onProgress!(
+    final callbacks = state.createCallbacks();
+    // The first event saves synchronously. The second arrives inside the
+    // 500 ms throttle window, so only the forced save in `dispose` writes it:
+    // the assertions below then prove the deferred write really lands.
+    callbacks.onProgress!(
       const ReaderProgressEvent(
         chapterIndex: 1,
         progress: 0.75,
         page: 2,
         pages: 3,
         element: 'sec',
+      ),
+    );
+    callbacks.onProgress!(
+      const ReaderProgressEvent(
+        chapterIndex: 2,
+        progress: 0.9,
+        page: 9,
+        pages: 9,
+        element: 'end',
       ),
     );
 
@@ -485,8 +498,8 @@ void main() {
 
     expect(tester.takeException(), isNull);
     final saved = container.read(libraryProvider).books.single;
-    expect(saved.lastChapterIndex, 1);
-    expect(saved.lastProgress, closeTo(0.75, 0.0001));
+    expect(saved.lastChapterIndex, 2);
+    expect(saved.lastProgress, closeTo(0.9, 0.0001));
   });
 
   testWidgets('closing the reader before the book loads does not throw', (
