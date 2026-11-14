@@ -40,6 +40,7 @@
     progressTimer: 0,
     lastNeed: null,
     suppressScroll: false,
+    chapterToken: 0,
     pending: null,
     missing: [],
     history: [],
@@ -714,6 +715,7 @@
     chapterTransfer.element = null;
 
     if (target === 'replace') {
+      state.chapterToken += 1;
       state.pending = null;
       if (state.auto.running) pauseAutoScroll();
       clearContent();
@@ -773,8 +775,13 @@
     normalizeSectionScale(el);
 
     if (target === 'replace') {
+      // A newer replace can start and finish before these frames run. The
+      // token turns the older callback into a no-op instead of restoring the
+      // previous chapter's position into the new one.
+      const token = state.chapterToken;
       requestAnimationFrame(function () {
         requestAnimationFrame(function () {
+          if (token !== state.chapterToken) return;
           computeLayout();
           if (payload.progress || payload.element) {
             goToProgress(payload.progress || 0, payload.element);

@@ -242,7 +242,7 @@ function buildDocument() {
   return { document, viewport, scroller, content, head };
 }
 
-function loadReader() {
+function loadReader({ deferFrames = false } = {}) {
   const { document, viewport, scroller, content, head } = buildDocument();
   const posts = [];
   const getComputedStyle = (element) => ({
@@ -259,15 +259,28 @@ function loadReader() {
       },
     },
   };
+  const frames = [];
+  let nextFrameId = 0;
+  const requestAnimationFrame = (callback) => {
+    if (!deferFrames) {
+      callback(performance.now());
+      return 1;
+    }
+    nextFrameId += 1;
+    frames.push({ id: nextFrameId, callback });
+    return nextFrameId;
+  };
+  const cancelAnimationFrame = (id) => {
+    if (!deferFrames) return;
+    const index = frames.findIndex((frame) => frame.id === id);
+    if (index >= 0) frames.splice(index, 1);
+  };
   const context = vm.createContext({
     document,
     window,
     getComputedStyle,
-    requestAnimationFrame: (callback) => {
-      callback(performance.now());
-      return 1;
-    },
-    cancelAnimationFrame: () => {},
+    requestAnimationFrame,
+    cancelAnimationFrame,
     setTimeout,
     clearTimeout,
     performance,
@@ -283,6 +296,10 @@ function loadReader() {
     head,
     posts,
     folio: window.folio,
+    flushFrame(now = performance.now()) {
+      const pending = frames.splice(0);
+      for (const frame of pending) frame.callback(now);
+    },
   };
 }
 
@@ -1092,4 +1109,24 @@ test('an unchanged chapter is not measured twice', () => {
   reader.folio.setSettings({});
 
   assert.equal(measured, 0, `re-measured ${measured} styles`);
+});
+
+test('a superseded replace does not restore or announce the old chapter', () => {
+  const reader = loadReader({ deferFrames: true });
+  const { folio, posts } = reader;
+
+  folio.init(defaults());
+  folio.setChapter({ index: 0, html: '<p>first</p>', hasNext: true });
+  // Both replaces are installed before either restore frame runs.
+  folio.setChapter({ index: 1, html: '<p>second</p>', hasNext: false });
+
+  posts.length = 0;
+  reader.flushFrame();
+  reader.flushFrame();
+
+  const ready = posts.filter((post) => post.type === 'chapterReady');
+  assert.deepEqual(
+    ready.map((post) => post.chapterIndex),
+    [1]
+  );
 });
