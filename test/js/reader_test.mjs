@@ -1147,3 +1147,61 @@ test('the scroll containers disable native scroll anchoring', () => {
   assert.match(block('#folio-scroll'), /overflow-anchor:\s*none/);
   assert.match(block('#folio-content'), /overflow-anchor:\s*none/);
 });
+
+test('a native scroll during auto-scroll pauses it', () => {
+  const reader = loadReader({ deferFrames: true });
+  const { folio, scroller } = reader;
+
+  folio.init(defaults());
+  addSection(reader, { index: 0, height: 3000 });
+  scroller.clientHeight = 600;
+  scroller.scrollHeight = 3000;
+
+  folio.startAutoScroll();
+  reader.flushFrame(0);
+  reader.flushFrame(16);
+  assert.equal(folio.state().running, true);
+  assert.ok(scroller.scrollTop > 0);
+
+  // A native pan moves the scroller; the animation must not drag it back.
+  scroller.scrollTop += 120;
+  scroller.dispatch('scroll', {});
+  assert.equal(folio.state().running, false);
+
+  const stoppedAt = scroller.scrollTop;
+  reader.flushFrame(32);
+  assert.equal(scroller.scrollTop, stoppedAt);
+});
+
+test('pointercancel clears the gesture and pauses auto-scroll', () => {
+  const reader = loadReader({ deferFrames: true });
+  const { folio, document, posts, scroller, content } = reader;
+
+  folio.init(defaults());
+  addSection(reader, { index: 0, height: 3000 });
+  scroller.clientHeight = 600;
+  scroller.scrollHeight = 3000;
+
+  folio.startAutoScroll();
+  reader.flushFrame(0);
+  reader.flushFrame(16);
+  assert.equal(folio.state().running, true);
+
+  document.dispatch('pointerdown', {
+    pointerType: 'touch',
+    button: 0,
+    clientX: 100,
+    clientY: 100,
+    target: content,
+  });
+  document.dispatch('pointercancel', {});
+  assert.equal(folio.state().running, false);
+
+  const posted = posts.length;
+  document.dispatch('pointerup', {
+    clientX: 100,
+    clientY: 100,
+    target: content,
+  });
+  assert.equal(posts.length, posted, 'a cancelled gesture is not a tap');
+});

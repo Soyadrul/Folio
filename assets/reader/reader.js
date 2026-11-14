@@ -32,6 +32,7 @@
       speed: 40,
       last: 0,
       pos: 0,
+      written: 0,
       raf: 0,
       started: false,
     },
@@ -479,7 +480,10 @@
       // the visible text does not jump. Content below needs no adjustment.
       if (top + height <= scroller().scrollTop) {
         scroller().scrollTop -= height;
-        if (state.auto.running) state.auto.pos -= height;
+        if (state.auto.running) {
+          state.auto.pos -= height;
+          state.auto.written = scroller().scrollTop;
+        }
       }
     }
     invalidateLayout();
@@ -809,7 +813,10 @@
       state.loadedEnd = payload.index;
       state.hasNext = !!payload.hasNext;
       // If auto-scroll is running, let it continue into the new content.
-      if (state.auto.running) state.auto.pos = scroller().scrollTop;
+      if (state.auto.running) {
+        state.auto.pos = scroller().scrollTop;
+        state.auto.written = state.auto.pos;
+      }
       post('chapterAppended', { chapterIndex: payload.index });
       relayout(60);
       return;
@@ -825,7 +832,10 @@
     if (!isBook()) {
       const delta = scroller().scrollHeight - before;
       scroller().scrollTop += delta;
-      if (state.auto.running) state.auto.pos += delta;
+      if (state.auto.running) {
+        state.auto.pos += delta;
+        state.auto.written = scroller().scrollTop;
+      }
     }
     post('chapterPrepended', { chapterIndex: payload.index });
     relayout(60);
@@ -879,6 +889,7 @@
     state.auto.running = true;
     state.auto.started = true;
     state.auto.pos = scroller().scrollTop;
+    state.auto.written = state.auto.pos;
     state.auto.last = performance.now();
     const step = function (now) {
       if (!state.auto.running) return;
@@ -889,6 +900,7 @@
       if (state.auto.pos >= max) {
         state.auto.pos = max;
         scroller().scrollTop = max;
+        state.auto.written = max;
         if (!state.hasNext) {
           pauseAutoScroll();
           return;
@@ -897,6 +909,7 @@
         return;
       }
       scroller().scrollTop = state.auto.pos;
+      state.auto.written = state.auto.pos;
       state.auto.raf = requestAnimationFrame(step);
     };
     state.auto.raf = requestAnimationFrame(step);
@@ -1021,6 +1034,14 @@
     post('tapZone', { zone: 'middle' });
   }
 
+  function onPointerCancel() {
+    // The browser took over the gesture to pan the page. Drop the touch so
+    // the matching pointerup cannot be mistaken for a tap, and stop scrolling
+    // instead of fighting the native pan.
+    state.touch = null;
+    if (state.auto.running) pauseAutoScroll();
+  }
+
   function onScroll() {
     if (!content()) return;
     if (isBook()) {
@@ -1042,10 +1063,20 @@
       return;
     }
 
+    // A native pan moves the scroller away from the position the animation
+    // wrote. Yield instead of fighting the next frame. Comparing with
+    // `auto.pos` would be racy: it advances before the scroll event for the
+    // previous write is delivered.
+    if (
+      state.auto.running &&
+      Math.abs(scroller().scrollTop - state.auto.written) > 2
+    ) {
+      pauseAutoScroll();
+    }
+
     const el = currentSection();
     if (el) {
-      const index = Number(el.getAttribute('data-folio-index'));
-      if (index !== state.index) {
+      const index = Number(el.getAttribute('data-folio-index'));      if (index !== state.index) {
         state.index = index;
         state.section = el;
         computeLayout();
@@ -1202,6 +1233,9 @@
   document.addEventListener('pointerdown', onPointerDown, { passive: true });
   document.addEventListener('pointermove', onPointerMove, { passive: true });
   document.addEventListener('pointerup', onPointerUp, { passive: true });
+  document.addEventListener('pointercancel', onPointerCancel, {
+    passive: true,
+  });
   document.addEventListener('click', onLinkClick, true);
   document.addEventListener('error', onImageError, true);
   document.addEventListener('load', onResourceLoad, true);
