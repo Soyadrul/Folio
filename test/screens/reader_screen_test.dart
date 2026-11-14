@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:folio/epub/epub.dart';
 import 'package:folio/models/app_settings.dart';
 import 'package:folio/models/book.dart';
+import 'package:folio/providers/library_provider.dart';
 import 'package:folio/providers/settings_provider.dart';
 import 'package:folio/reader/keep_screen_on.dart';
 import 'package:folio/reader/reader_system_ui.dart';
@@ -431,6 +432,83 @@ void main() {
     expect(VolumeKeys.debugEnabled, isFalse);
     expect(KeepScreenOn.debugWanted, isFalse);
   });
+
+  testWidgets('the last position reaches the library after the reader closes', (
+    tester,
+  ) async {
+    final book = Book(path: epub.path, title: 'Old Book', author: 'Jane Doe');
+    final loader = EpubLoader(cacheRoot: Directory(p.join(tmp.path, 'cache')));
+    final container = ProviderContainer(
+      overrides: [libraryProvider.overrideWith(() => _SeededLibrary(book))],
+    );
+    addTearDown(container.dispose);
+
+    await tester.runAsync(() async {
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            theme: buildLightTheme(),
+            home: ReaderScreen(book: book, loader: loader),
+          ),
+        ),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 1500));
+    });
+    await tester.pump();
+    expect(find.text('One'), findsOneWidget);
+
+    final state = tester.state<ReaderScreenState>(find.byType(ReaderScreen));
+    state.createCallbacks().onProgress!(
+      const ReaderProgressEvent(
+        chapterIndex: 1,
+        progress: 0.75,
+        page: 2,
+        pages: 3,
+        element: 'sec',
+      ),
+    );
+
+    // Close the reader the same way the library does: swap the screen out while
+    // the provider container lives on.
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          theme: buildLightTheme(),
+          home: const _LibraryHome(),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(tester.takeException(), isNull);
+    final saved = container.read(libraryProvider).books.single;
+    expect(saved.lastChapterIndex, 1);
+    expect(saved.lastProgress, closeTo(0.75, 0.0001));
+  });
+
+  testWidgets('closing the reader before the book loads does not throw', (
+    tester,
+  ) async {
+    final book = Book(path: epub.path, title: 'Old Book', author: 'Jane Doe');
+
+    await tester.pumpWidget(
+      ProviderScope(
+        child: MaterialApp(
+          theme: buildLightTheme(),
+          home: ReaderScreen(book: book, loader: _PendingLoader()),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(tester.takeException(), isNull);
+  });
 }
 
 /// Answers every HTTP request with a future that never completes, so font
@@ -524,4 +602,35 @@ Map<String, Object> epubEntries({bool withAuxiliary = false}) {
 ''';
   }
   return entries;
+}
+
+/// A library notifier that already contains [book], so the reader's position
+/// update is visible without running a folder scan.
+class _SeededLibrary extends LibraryNotifier {
+  _SeededLibrary(this.book);
+
+  final Book book;
+
+  @override
+  LibraryState build() => LibraryState(books: [book]);
+}
+
+/// A stand-in for the home screen: only the library book count is needed.
+class _LibraryHome extends ConsumerWidget {
+  const _LibraryHome();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final books = ref.watch(libraryProvider).books;
+    return Scaffold(
+      body: Text('books: ${books.length}', textDirection: TextDirection.ltr),
+    );
+  }
+}
+
+/// Never finishes loading, so the reader can be closed mid-load.
+class _PendingLoader extends EpubLoader {
+  @override
+  Future<EpubDocument> load(String filePath) =>
+      Completer<EpubDocument>().future;
 }

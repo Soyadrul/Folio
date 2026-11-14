@@ -105,7 +105,7 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
     // The process can be killed right after the reader closes; do not lose a
     // settings change made within the notifier's debounce window.
     unawaited(_settingsNotifier.flush());
-    _persistPosition(force: true);
+    _persistPosition(force: true, deferLibraryUpdate: true);
     VolumeKeys.removeHandler(_onVolumeKey);
     KeepScreenOn.release(this);
     _fade.dispose();
@@ -292,27 +292,50 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
     _persistPosition();
   }
 
-  void _persistPosition({bool force = false}) {
+  void _persistPosition({bool force = false, bool deferLibraryUpdate = false}) {
     if (_document == null) return;
     final chapter = _chapterIndex < 0 ? 0 : _chapterIndex;
     final now = DateTime.now().millisecondsSinceEpoch;
     if (!force && now - _lastSavedMs < 500) return;
     _lastSavedMs = now;
     final overall = _overallProgress;
-    _library.updateReadingProgress(
-      widget.book.path,
-      chapter,
-      _chapterProgress,
-      overallProgress: overall,
-    );
+    final progress = _chapterProgress;
+    final element = _element;
+    final bookPath = widget.book.path;
+
+    if (deferLibraryUpdate) {
+      // The widget tree may be locked while this reader is being unmounted.
+      // Let the current frame finish before notifying the library; the disk
+      // write below is independent and still happens immediately.
+      scheduleMicrotask(() {
+        try {
+          _library.updateReadingProgress(
+            bookPath,
+            chapter,
+            progress,
+            overallProgress: overall,
+          );
+        } catch (_) {
+          // The provider container can already be gone during app teardown.
+        }
+      });
+    } else {
+      _library.updateReadingProgress(
+        bookPath,
+        chapter,
+        progress,
+        overallProgress: overall,
+      );
+    }
+
     unawaited(
       _positions
           .save(
-            widget.book.path,
+            bookPath,
             ReadingPosition(
               chapterIndex: chapter,
-              progress: _chapterProgress,
-              element: _element,
+              progress: progress,
+              element: element,
               overallProgress: overall,
             ),
           )
