@@ -320,6 +320,38 @@ void main() {
     await tester.pump(const Duration(milliseconds: 121));
     expect(pages, 1, reason: 'the pending notifications collapse into one');
   });
+
+  testWidgets('manual scrolling pauses Linux auto-scroll', (tester) async {
+    final document = _FakeDocument([_longBody()]);
+    final controller = ReaderContentController();
+
+    await _pumpReader(
+      tester,
+      _readerApp(document: document, controller: controller, changes: []),
+    );
+
+    await controller.startAutoScroll();
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(controller.autoScrollRunning, isTrue);
+
+    final scrollable = tester.state<ScrollableState>(find.byType(Scrollable));
+
+    // The drag is the user's own scroll input; auto-scroll must yield to it.
+    await tester.drag(find.byType(FlutterReader), const Offset(0, -220));
+    await tester.pump();
+    expect(controller.autoScrollRunning, isFalse);
+
+    final dragged = scrollable.position.pixels;
+    expect(dragged, greaterThan(100));
+
+    // A stopped ticker must not snap the view back to its old position.
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(
+      scrollable.position.pixels,
+      greaterThanOrEqualTo(dragged - 1),
+      reason: 'auto-scroll must not drag the view back',
+    );
+  });
 }
 
 Widget _readerApp({

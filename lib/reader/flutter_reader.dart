@@ -51,6 +51,11 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
   bool _autoRunning = false;
   int _autoSpeed = 40;
   double _autoPosition = 0;
+
+  /// True only while a `jumpTo` comes from the auto-scroll ticker or a layout
+  /// restore. Scroll notifications from our own movement must not pause
+  /// auto-scroll, while every other movement is manual input.
+  bool _autoJump = false;
   bool _restoring = false;
   bool _loading = false;
   int _chapterIndex = 0;
@@ -125,7 +130,7 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
         0.0,
         _scroll.position.maxScrollExtent,
       );
-      _scroll.jumpTo(target);
+      _jumpTo(target);
       _autoPosition = target;
       _report(force: true);
     });
@@ -260,11 +265,29 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
     if (mounted) _load(pending, progress: progress, element: element);
   }
 
+  void _jumpTo(double target) {
+    _autoJump = true;
+    try {
+      _scroll.jumpTo(target);
+    } finally {
+      _autoJump = false;
+    }
+  }
+
   ChapterContent? _content;
 
   void _onScroll() {
     if (_restoring || !_scroll.hasClients) return;
     final pixels = _scroll.position.pixels;
+
+    // Wheel, scrollbar, keyboard and drag all move the controller without
+    // going through the ticker. Mirror the WebView reader and stop instead of
+    // fighting the user's scroll on the next frame.
+    if (_autoRunning && !_autoJump) {
+      _autoPosition = pixels;
+      pauseAutoScroll();
+    }
+
     final direction = pixels > _lastScrollPixels
         ? 1
         : (pixels < _lastScrollPixels ? -1 : 0);
@@ -355,7 +378,7 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
     final max = _scroll.position.maxScrollExtent;
     _autoPosition += _autoSpeed * delta;
     if (_autoPosition >= max) _autoPosition = max;
-    _scroll.jumpTo(_autoPosition);
+    _jumpTo(_autoPosition);
   }
 
   @override
