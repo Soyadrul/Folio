@@ -24,9 +24,9 @@ double scrollSpeedAfterVolumeKey(double current, VolumeKey key) {
 
 /// Bridge to the Android activity that intercepts the hardware volume keys.
 ///
-/// On other platforms this is a no-op. The activity only consumes the keys
-/// while [setEnabled] is true, so they keep their normal system behaviour in
-/// the library and in Settings.
+/// On other platforms this is a no-op. Readers register in order and the
+/// newest registered reader decides whether the activity consumes the keys, so
+/// they keep their normal system behaviour in the library and in Settings.
 class VolumeKeys {
   static const MethodChannel _channel = MethodChannel('folio/volume');
 

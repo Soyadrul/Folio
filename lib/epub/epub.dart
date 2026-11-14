@@ -362,7 +362,9 @@ class EpubLoader {
     );
     try {
       await temp.create(recursive: true);
-      await _isolateRunner(() => _extractArchive(file.path, temp.path));
+      final epubPath = file.path;
+      final targetPath = temp.path;
+      await _isolateRunner(() => _extractArchive(epubPath, targetPath));
       await File(p.join(temp.path, '.folio-cache.json')).writeAsString(
         jsonEncode({
           'path': absolute,
