@@ -15,6 +15,10 @@ const source = readFileSync(
   resolve(here, '../../assets/reader/reader.js'),
   'utf8'
 );
+const stylesheet = readFileSync(
+  resolve(here, '../../assets/reader/reader.css'),
+  'utf8'
+);
 
 const wait = (ms) => new Promise((resolveWait) => setTimeout(resolveWait, ms));
 
@@ -1129,4 +1133,17 @@ test('a superseded replace does not restore or announce the old chapter', () => 
     ready.map((post) => post.chapterIndex),
     [1]
   );
+});
+
+test('the scroll containers disable native scroll anchoring', () => {
+  const block = (selector) => {
+    const match = stylesheet.match(
+      new RegExp(selector + '\\s*\\{[^}]*\\}')
+    );
+    assert.ok(match, `${selector} must exist in reader.css`);
+    return match[0];
+  };
+
+  assert.match(block('#folio-scroll'), /overflow-anchor:\s*none/);
+  assert.match(block('#folio-content'), /overflow-anchor:\s*none/);
 });

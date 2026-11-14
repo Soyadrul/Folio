@@ -44,6 +44,10 @@ body {
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
+  /* The reader compensates scroll offset itself when a chapter is inserted
+     or trimmed. Chromium's scroll anchoring would apply the same correction
+     a second time, causing a visible jump. */
+  overflow-anchor: none;
 }
 
 #folio-content {
@@ -58,6 +62,7 @@ body {
   -webkit-hyphens: var(--folio-hyphens);
   overflow-wrap: break-word;
   word-wrap: break-word;
+  overflow-anchor: none;
 }
 
 /* The book's own CSS may force colours that disappear on dark/sepia themes. */
