@@ -1076,7 +1076,8 @@
 
     const el = currentSection();
     if (el) {
-      const index = Number(el.getAttribute('data-folio-index'));      if (index !== state.index) {
+      const index = Number(el.getAttribute('data-folio-index'));
+      if (index !== state.index) {
         state.index = index;
         state.section = el;
         computeLayout();

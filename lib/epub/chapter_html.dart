@@ -858,6 +858,14 @@ String stripThemeDeclarations(String css) {
   var index = 0;
   while (index < source.length) {
     final brace = _findTopLevelChar(source, index, '{');
+    final semicolon = _findTopLevelChar(source, index, ';');
+    if (semicolon >= 0 && (brace < 0 || semicolon < brace)) {
+      // Statement-form at-rules such as @charset and @namespace have no
+      // block. Copy them without letting them swallow the next rule.
+      output.write(source.substring(index, semicolon + 1));
+      index = semicolon + 1;
+      continue;
+    }
     if (brace < 0) {
       output.write(source.substring(index));
       break;

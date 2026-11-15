@@ -400,6 +400,28 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('a malformed data: image degrades to an empty box', (
+    tester,
+  ) async {
+    final document = _FakeDocument([
+      '<p>Broken image.</p><img alt="" src="data:image/png;base64,///"/>',
+    ]);
+
+    await _pumpReader(
+      tester,
+      _readerApp(
+        document: document,
+        controller: ReaderContentController(),
+        changes: [],
+      ),
+    );
+
+    expect(find.byType(Image), findsNothing);
+    expect(tester.takeException(), isNull);
+    final html = tester.widget<Html>(find.byType(Html));
+    expect(html.data ?? '', contains('Broken image.'));
+  });
+
   testWidgets('publisher CSS cannot override the Linux theme', (tester) async {
     final document = _FakeDocument([
       '<p>Chapter text.</p>',

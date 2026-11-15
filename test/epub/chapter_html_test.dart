@@ -631,5 +631,16 @@ void main() {
       );
       expect(html, contains('text-indent: 1em'));
     });
+
+    test('strips rules after statement-form at-rules', () {
+      final html = stripBookThemeCss(
+        '<style>@charset "utf-8"; '
+        r'@namespace svg url(http://www.w3.org/2000/svg); '
+        'body { color: red; margin: 0 }</style>',
+      );
+
+      expect(html, contains('margin: 0'));
+      expect(html, isNot(contains('color: red')));
+    });
   });
 }
