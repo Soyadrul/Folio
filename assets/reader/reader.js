@@ -497,6 +497,7 @@
       const top = el.offsetTop;
       const height = el.offsetHeight;
       el.remove();
+      removeHeadFor(index);
       // Removing content above the reader shifts everything up; compensate so
       // the visible text does not jump. Content below needs no adjustment.
       if (top + height <= scroller().scrollTop) {
@@ -690,15 +691,36 @@
   }
 
   function applyHead(payload) {
-    head().innerHTML = payload.head || '';
+    head().innerHTML = '';
+    mergeHead(payload);
   }
 
+  // Each chapter's scoped CSS lives in its own marker element so trimming a
+  // chapter can remove exactly its styles. Rebuilding `#folio-head` from
+  // `innerHTML` on every append also re-parsed the whole head (O(n²)).
   function mergeHead(payload) {
     if (!payload.head) return;
-    const current = head().innerHTML;
-    if (current.indexOf(payload.head) === -1) {
-      head().innerHTML = current + '\n' + payload.head;
-    }
+    const index = String(payload.index);
+    const existing = Array.prototype.slice
+      .call(head().children)
+      .find(function (el) {
+        return el.getAttribute('data-folio-style-for') === index;
+      });
+    if (existing) return;
+    const wrapper = document.createElement('div');
+    wrapper.setAttribute('data-folio-style-for', index);
+    wrapper.innerHTML = payload.head;
+    head().appendChild(wrapper);
+  }
+
+  function removeHeadFor(index) {
+    const marker = String(index);
+    const existing = Array.prototype.slice
+      .call(head().children)
+      .find(function (el) {
+        return el.getAttribute('data-folio-style-for') === marker;
+      });
+    if (existing) existing.remove();
   }
 
   // A chapter arrives in three steps (`startChapter`, one or more

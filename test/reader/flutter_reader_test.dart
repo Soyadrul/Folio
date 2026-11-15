@@ -213,6 +213,110 @@ void main() {
     expect(state.autoScrollSpeed, 120);
   });
 
+  testWidgets('Linux auto-scroll reports its state to the chrome', (
+    tester,
+  ) async {
+    final document = _FakeDocument([_longBody()]);
+    final controller = ReaderContentController();
+    final events = <(bool, int)>[];
+
+    await _pumpReader(
+      tester,
+      _readerApp(
+        document: document,
+        controller: controller,
+        changes: [],
+        callbacks: ReaderCallbacks(
+          onChapterChanged: (_) {},
+          onAutoScroll: (running, speed) => events.add((running, speed)),
+        ),
+      ),
+    );
+
+    await controller.startAutoScroll();
+    expect(events, isNotEmpty);
+    expect(events.last, (true, 40));
+
+    await controller.setAutoScrollSpeed(90);
+    expect(events.last, (true, 90));
+
+    await controller.pauseAutoScroll();
+    expect(events.last, (false, 90));
+    expect(controller.autoScrollRunning, isFalse);
+  });
+
+  testWidgets('Linux auto-scroll advances past a short chapter', (
+    tester,
+  ) async {
+    final document = _FakeDocument(['<p>Short dedication.</p>', _longBody()]);
+    final changes = <int>[];
+    final controller = ReaderContentController();
+
+    await _pumpReader(
+      tester,
+      _readerApp(document: document, controller: controller, changes: changes),
+    );
+
+    await controller.startAutoScroll();
+    // The boundary guard compares wall-clock time, so wait for it for real:
+    // pumping fake frames does not move DateTime.now() forward.
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 550)),
+    );
+    // The ticker's first callback has elapsed == 0; the next one moves.
+    await tester.pump(const Duration(milliseconds: 16));
+    await tester.pump(const Duration(milliseconds: 16));
+    await _pumpFrames(tester, 3);
+
+    expect(changes, [0, 1]);
+    expect(controller.currentChapter, 1);
+  });
+
+  testWidgets('Linux auto-scroll stops at the end of the book', (tester) async {
+    final document = _FakeDocument(['<p>Short last chapter.</p>']);
+    final changes = <int>[];
+    final controller = ReaderContentController();
+
+    await _pumpReader(
+      tester,
+      _readerApp(document: document, controller: controller, changes: changes),
+    );
+
+    await controller.startAutoScroll();
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 550)),
+    );
+    await tester.pump(const Duration(milliseconds: 16));
+    await tester.pump(const Duration(milliseconds: 16));
+
+    expect(controller.autoScrollRunning, isFalse);
+    expect(changes, [0]);
+  });
+
+  testWidgets('Linux auto-start fires only once per book', (tester) async {
+    final document = _FakeDocument([_longBody(), _longBody()]);
+    final controller = ReaderContentController();
+
+    await _pumpReader(
+      tester,
+      _readerApp(
+        document: document,
+        controller: controller,
+        changes: [],
+        settings: const AppSettings(scrollAutoStart: true),
+      ),
+    );
+    expect(controller.autoScrollRunning, isTrue);
+
+    await controller.pauseAutoScroll();
+    expect(controller.autoScrollRunning, isFalse);
+
+    await controller.loadChapter(1);
+    await _pumpFrames(tester, 3);
+
+    expect(controller.autoScrollRunning, isFalse);
+  });
+
   testWidgets('SVG images render in the Linux reader', (tester) async {
     final directory = Directory.systemTemp.createTempSync('folio_svg_');
     addTearDown(() {

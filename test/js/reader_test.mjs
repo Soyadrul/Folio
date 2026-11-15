@@ -1374,3 +1374,47 @@ test('trimming the first chapter restores the previous flag from the DOM', async
     'chapter 1 can be requested again after chapter 0 was trimmed'
   );
 });
+
+test('trimming a chapter removes its scoped head styles', () => {
+  const reader = loadReader();
+  const scroller = reader.scroller;
+  scroller.clientHeight = 600;
+  scroller.clientWidth = 400;
+  reader.folio.init(defaults());
+
+  reader.folio.startChapter({
+    index: 5,
+    hasPrev: true,
+    hasNext: true,
+    head: '<style>chapter-five{color:red}</style>',
+  });
+  reader.folio.endChapter();
+  placeSection(reader, 5, 0);
+  for (const index of [6, 7, 8]) {
+    reader.folio.startChapter({
+      index,
+      target: 'append',
+      hasPrev: true,
+      hasNext: true,
+      head: `<style>chapter-${index}{color:blue}</style>`,
+    });
+    reader.folio.endChapter();
+    placeSection(reader, index, (index - 5) * 1200);
+  }
+  scroller.scrollHeight = 4800;
+
+  // Reading into chapter 8 trims chapters 5 and 6.
+  scroller.scrollTop = 3700;
+  scroller.dispatch('scroll');
+  assert.deepEqual(sectionIndexes(reader), [7, 8]);
+
+  const markers = reader.head.children.map((el) =>
+    el.getAttribute('data-folio-style-for')
+  );
+  assert.deepEqual(markers, ['7', '8']);
+  const css = reader.head.textContent;
+  assert.ok(!css.includes('chapter-five'), 'trimmed chapter CSS is gone');
+  assert.ok(!css.includes('chapter-6'), 'trimmed chapter CSS is gone');
+  assert.ok(css.includes('chapter-7'), 'kept chapter CSS stays');
+  assert.ok(css.includes('chapter-8'), 'kept chapter CSS stays');
+});

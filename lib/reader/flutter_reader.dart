@@ -65,6 +65,10 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
   double _lastScrollPixels = 0;
   int _lastLoadFinishedAt = 0;
 
+  /// Auto-scroll has been started once for this book. "Start automatically"
+  /// must not re-arm after the user pauses it and turns the page.
+  bool _autoStartedOnce = false;
+
   /// The `Html` widget's anchor key. It is replaced on every chapter load so
   /// anchors from the previous chapter cannot be reused.
   GlobalKey _anchorKey = GlobalKey();
@@ -200,7 +204,9 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
       _restoring = false;
       _finishLoad();
       _report(force: true);
-      if (widget.settings.scrollAutoStart) startAutoScroll();
+      if (widget.settings.scrollAutoStart && !_autoStartedOnce) {
+        startAutoScroll();
+      }
     });
   }
 
@@ -377,8 +383,28 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
     if (delta <= 0) return;
     final max = _scroll.position.maxScrollExtent;
     _autoPosition += _autoSpeed * delta;
-    if (_autoPosition >= max) _autoPosition = max;
-    _jumpTo(_autoPosition);
+    if (_autoPosition < max) {
+      _jumpTo(_autoPosition);
+      return;
+    }
+    // A chapter that fits the viewport has no scroll range, so `onScroll`
+    // never fires and cannot ask for the next chapter. Advance from the
+    // ticker instead, using the same boundary guard as manual crossings.
+    _autoPosition = max;
+    _jumpTo(max);
+    _advanceFromTicker();
+  }
+
+  void _advanceFromTicker() {
+    if (_loading || _restoring) return;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (now - _lastLoadFinishedAt < _boundaryGuard.inMilliseconds) return;
+    final next = widget.document.nextReadingIndex(_chapterIndex);
+    if (next == null) {
+      pauseAutoScroll();
+      return;
+    }
+    _load(next);
   }
 
   @override
@@ -498,10 +524,12 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
   Future<void> startAutoScroll() async {
     if (_autoRunning || !_scroll.hasClients) return;
     _autoRunning = true;
+    _autoStartedOnce = true;
     _autoPosition = _scroll.position.pixels;
     _lastTick = Duration.zero;
     _ticker.start();
     setState(() {});
+    _notifyAutoScroll();
   }
 
   @override
@@ -510,12 +538,20 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
     _autoRunning = false;
     _ticker.stop();
     setState(() {});
+    _notifyAutoScroll();
   }
 
   @override
   Future<void> setAutoScrollSpeed(int speed) async {
     _autoSpeed = speed.clamp(5, 300);
     setState(() {});
+    _notifyAutoScroll();
+  }
+
+  /// Keeps the chrome's play/pause button and speed badge in step with the
+  /// ticker; the WebView backend reports the same events from JavaScript.
+  void _notifyAutoScroll() {
+    widget.callbacks.onAutoScroll?.call(_autoRunning, _autoSpeed);
   }
 
   @override
