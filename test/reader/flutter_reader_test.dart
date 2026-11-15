@@ -427,6 +427,28 @@ void main() {
     expect(pages, 1, reason: 'the pending notifications collapse into one');
   });
 
+  testWidgets('a chapter that fits the viewport reports full progress', (
+    tester,
+  ) async {
+    final document = _FakeDocument(['<p>A short dedication.</p>']);
+    double? progress;
+
+    await _pumpReader(
+      tester,
+      _readerApp(
+        document: document,
+        controller: ReaderContentController(),
+        changes: [],
+        callbacks: ReaderCallbacks(
+          onChapterChanged: (_) {},
+          onProgress: (event) => progress = event.progress,
+        ),
+      ),
+    );
+
+    expect(progress, 1);
+  });
+
   testWidgets('manual scrolling pauses Linux auto-scroll', (tester) async {
     final document = _FakeDocument([_longBody()]);
     final controller = ReaderContentController();

@@ -193,15 +193,22 @@ EpubCover? _readCoverFromArchive(
       }
     }
 
-    // 4. First image in the first spine chapter.
+    // 4. First image in the first linear spine chapter. Only that one chapter
+    // is inspected: scanning further could pick an unrelated illustration and
+    // costs another HTML parse for every card without a declared cover.
     if (coverPath == null && spine != null) {
       for (final itemref in _allElements(spine, 'itemref')) {
+        if ((_attribute(itemref, 'linear') ?? '').toLowerCase() == 'no') {
+          continue;
+        }
         final item = manifestItems[_attribute(itemref, 'idref')];
         if (item == null) continue;
         final path = resolveHref(item.href);
-        if (path == null || _isImagePath(path)) continue;
-        coverPath = _firstImageIn(path, entries, resolver);
-        if (coverPath != null) break;
+        if (path == null) continue;
+        coverPath = _isImagePath(path)
+            ? path
+            : _firstImageIn(path, entries, resolver);
+        break;
       }
     }
 

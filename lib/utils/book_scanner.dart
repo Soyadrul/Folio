@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:isolate';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
 import '../epub/epub_metadata.dart';
@@ -19,6 +20,7 @@ class LibraryScan {
     this.unreadablePaths = const [],
     this.permissionDenied = false,
     this.cacheHits = 0,
+    this.metadataFailed = false,
   });
 
   final List<Book> books;
@@ -35,6 +37,10 @@ class LibraryScan {
   /// Books whose metadata came from the cache instead of being re-read.
   final int cacheHits;
 
+  /// True when the metadata isolate failed and the books were listed from
+  /// their file names instead.
+  final bool metadataFailed;
+
   int get skippedFolders => unreadablePaths.length;
 }
 
@@ -50,6 +56,8 @@ class LibraryScan {
 Future<LibraryScan> scanFolderForBooks(
   String folderPath, {
   String? cachePath,
+  @visibleForTesting
+  Future<List<Map<String, Object?>>> Function()? metadataLoader,
 }) async {
   final dir = Directory(folderPath);
   if (!await dir.exists()) return const LibraryScan(exists: false);
@@ -63,12 +71,21 @@ Future<LibraryScan> scanFolderForBooks(
   }
 
   List<Map<String, Object?>> metadata;
+  var metadataFailed = false;
   try {
-    metadata = await Isolate.run(
-      () => _readAllMetadata(collected.paths, cachePath, folderPath),
-    );
-  } on Object {
+    final loader =
+        metadataLoader ??
+        () => Isolate.run(
+          () => _readAllMetadata(collected.paths, cachePath, folderPath),
+        );
+    metadata = await loader();
+  } on Object catch (error, stackTrace) {
+    // One bad book or an out-of-memory isolate must not hide the whole
+    // library behind a blank grid. List every file and tell the user why the
+    // titles are missing.
+    debugPrint('Folio: metadata scan failed: $error\n$stackTrace');
     metadata = const [];
+    metadataFailed = true;
   }
 
   final byPath = <String, Map<String, Object?>>{
@@ -76,13 +93,29 @@ Future<LibraryScan> scanFolderForBooks(
       if (item['path'] is String) item['path']! as String: item,
   };
 
+  // Without metadata the isolate never stats the files, but the library still
+  // needs a modification time so a changed book refreshes its card later.
+  final fallbackModified = <String, int>{};
+  if (metadataFailed) {
+    for (final path in collected.paths) {
+      try {
+        fallbackModified[path] = (await File(
+          path,
+        ).stat()).modified.millisecondsSinceEpoch;
+      } on FileSystemException {
+        // The card will show 0; the next scan can try again.
+      }
+    }
+  }
+
   final books = collected.paths.map((path) {
     final item = byPath[path];
     return Book(
       path: path,
       title: (item?['title'] as String?) ?? p.basenameWithoutExtension(path),
       author: (item?['author'] as String?) ?? 'Unknown Author',
-      lastModifiedMs: (item?['modified'] as int?) ?? 0,
+      lastModifiedMs:
+          (item?['modified'] as int?) ?? fallbackModified[path] ?? 0,
     );
   }).toList();
 
@@ -92,6 +125,7 @@ Future<LibraryScan> scanFolderForBooks(
     unreadablePaths: collected.unreadablePaths,
     permissionDenied: collected.permissionDenied,
     cacheHits: metadata.where((item) => item['cached'] == true).length,
+    metadataFailed: metadataFailed,
   );
 }
 

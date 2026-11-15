@@ -2,7 +2,6 @@ import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:folio/reader/webview_security.dart';
 
 void main() {
@@ -37,9 +36,7 @@ void main() {
   });
 
   test('blocks every navigation after the shell has loaded', () {
-    final url = WebUri('https://example.com/tracker');
-    expect(readerAllowsNavigation(shellLoaded: false, url: url), isTrue);
-    expect(readerAllowsNavigation(shellLoaded: true, url: url), isFalse);
-    expect(readerAllowsNavigation(shellLoaded: true, url: null), isFalse);
+    expect(readerAllowsNavigation(shellLoaded: false), isTrue);
+    expect(readerAllowsNavigation(shellLoaded: true), isFalse);
   });
 }

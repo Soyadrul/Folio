@@ -77,4 +77,20 @@ void main() {
       ),
     );
   });
+  test('collapses whitespace in the title and author', () async {
+    final opf = epub2Opf
+        .replaceFirst(
+          '<dc:title>Old Book</dc:title>',
+          '<dc:title>Old\n   Book</dc:title>',
+        )
+        .replaceFirst(
+          '<dc:creator>Jane Doe</dc:creator>',
+          '<dc:creator>Jane\n\t   Doe</dc:creator>',
+        );
+    final file = await EpubFixture.write(tmp, epub2Entries(opf: opf));
+    final metadata = await readEpubMetadata(file.path);
+
+    expect(metadata.title, 'Old Book');
+    expect(metadata.author, 'Jane Doe');
+  });
 }

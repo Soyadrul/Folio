@@ -91,6 +91,10 @@ class MetadataCache {
     });
   }
 
+  /// Serialises writes made by this isolate. Scans run in separate isolates,
+  /// so this queue cannot order their writes; the unique temporary name in
+  /// [_writeAtomically] keeps those concurrent saves from clobbering each
+  /// other's temporary file.
   static final Map<String, Future<void>> _writes = {};
 
   Future<void> save() async {
@@ -104,7 +108,11 @@ class MetadataCache {
 
   Future<void> _writeAtomically(String path) async {
     final file = File(path);
-    final temporary = File('$path.tmp');
+    // Two scans run in different isolates, so each write needs its own
+    // temporary file; a shared `.tmp` name let them overwrite and rename each
+    // other's half-written JSON.
+    final unique = '$pid.${DateTime.now().microsecondsSinceEpoch}';
+    final temporary = File('$path.$unique.tmp');
     try {
       await file.parent.create(recursive: true);
       await temporary.writeAsString(

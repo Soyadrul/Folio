@@ -4,6 +4,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.view.KeyEvent
 import android.view.WindowManager
@@ -174,7 +175,14 @@ class MainActivity : FlutterActivity() {
             .joinToString("") { "%02x".format(it) }
             .take(16)
         val target = File(dir, "$digest-$fileName")
-        if (target.isFile && target.length() > 0) return target.absolutePath
+        val size = sourceSize(uri)
+        val modified = sourceModified(uri)
+        if (target.isFile && target.length() > 0 && isCurrent(target, size, modified)) {
+            // Opening the book counts as a use: the 7-day prune must not
+            // remove a copy the user reads every day.
+            target.setLastModified(System.currentTimeMillis())
+            return target.absolutePath
+        }
 
         val partial = File(dir, "$digest-$fileName.part")
         val input = contentResolver.openInputStream(uri) ?: return null
@@ -185,11 +193,55 @@ class MainActivity : FlutterActivity() {
             partial.delete()
             return null
         }
+        // A provider may reuse the URI for changed content, so a stale target
+        // can exist. Some filesystems refuse to rename onto it.
+        target.delete()
         if (!partial.renameTo(target)) {
             partial.delete()
             return null
         }
         return target.absolutePath
+    }
+
+    /** Declared size of [uri], or null when the provider does not report one. */
+    private fun sourceSize(uri: Uri): Long? {
+        return try {
+            contentResolver.query(
+                uri,
+                arrayOf(OpenableColumns.SIZE),
+                null,
+                null,
+                null,
+            )?.use { cursor ->
+                if (!cursor.moveToFirst()) return null
+                val index = cursor.getColumnIndex(OpenableColumns.SIZE)
+                if (index < 0 || cursor.isNull(index)) null else cursor.getLong(index)
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /** Last-modified time reported by a documents provider, when available. */
+    private fun sourceModified(uri: Uri): Long? {
+        return try {
+            DocumentsContract.getDocumentLastModified(contentResolver, uri)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * True when [target] still matches the source. Unknown values are treated
+     * as matching, so providers that report neither size nor mtime keep the
+     * old reuse behaviour instead of copying the book on every open.
+     */
+    private fun isCurrent(target: File, size: Long?, modified: Long?): Boolean {
+        if (size != null && size >= 0 && target.length() != size) return false
+        // `target`'s mtime is the last time it was opened. A source changed
+        // after that is stale; one changed before it is already included.
+        if (modified != null && modified > target.lastModified()) return false
+        return true
     }
 
     private fun displayName(uri: Uri): String? {

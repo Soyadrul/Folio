@@ -310,6 +310,19 @@ void main() {
       expect(c.bodyHtml, isNot(contains('<form')));
       expect(c.bodyHtml, isNot(contains('<object')));
     });
+
+    test('turns an image <object> into an <img>', () {
+      final c = rewrite(
+        '<object data="../images/pic.jpg" type="image/jpeg">'
+        '<p>Fallback</p></object>',
+      );
+      expect(c.bodyHtml, contains('<img'));
+      expect(
+        c.bodyHtml,
+        contains('src="file:///cache/book/OEBPS/images/pic.jpg"'),
+      );
+      expect(c.bodyHtml, isNot(contains('<object')));
+    });
   });
 
   group('splitSrcsetCandidates', () {
@@ -511,6 +524,30 @@ void main() {
       );
     });
 
+    test(
+      'an @import without a semicolon does not swallow the next rule',
+      () async {
+        const content = ChapterContent(
+          bodyHtml: '<p class="note">x</p>',
+          headHtml:
+              '<style>@import "other.css"\n'
+              '.note { text-indent: 1em }</style>',
+          missingResources: [],
+        );
+
+        final prepared = await prepareChapterStyles(
+          content,
+          chapterIndex: 0,
+          chapterPath: 'OEBPS/text/ch1.xhtml',
+          bookRoot: tmp.path,
+          resolver: resolver,
+        );
+
+        expect(prepared.webStyleHtml, isNot(contains('@import')));
+        expect(prepared.webStyleHtml, contains('text-indent: 1em'));
+      },
+    );
+
     test('keeps book CSS for the fallback without scope prefixes', () async {
       const content = ChapterContent(
         bodyHtml: '<p>x</p>',
@@ -631,6 +668,25 @@ void main() {
       );
       expect(html, contains('text-indent: 1em'));
     });
+
+    test(
+      'rewrites font and background shorthands instead of dropping them',
+      () {
+        final html = stripBookThemeCss(
+          '<style>p { font: italic bold 16px/1.4 Georgia, serif; '
+          'background: #fff url(pic.png) no-repeat center; '
+          'margin: 0 }</style>',
+        );
+
+        expect(html, contains('font-style: italic'));
+        expect(html, contains('font-weight: bold'));
+        expect(html, contains('background-image: url(pic.png)'));
+        expect(html, contains('margin: 0'));
+        expect(html, isNot(contains('font-size')));
+        expect(html, isNot(contains('font-family')));
+        expect(html, isNot(contains('#fff')));
+      },
+    );
 
     test('strips rules after statement-form at-rules', () {
       final html = stripBookThemeCss(

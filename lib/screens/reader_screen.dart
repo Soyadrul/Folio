@@ -20,6 +20,30 @@ import '../reader/webview_reader.dart';
 import '../utils/theme_utils.dart';
 import 'settings_screen.dart';
 
+/// The index in [entries] that best describes the visible location.
+///
+/// Several TOC entries can point at the same chapter. When the reader reports
+/// a visible element, the entry whose fragment matches it wins; otherwise the
+/// first entry for the chapter is used.
+int tocSelectionIndex(
+  List<EpubTocEntry> entries, {
+  required int chapterIndex,
+  String? element,
+}) {
+  if (element != null && element.isNotEmpty) {
+    for (var i = 0; i < entries.length; i++) {
+      final entry = entries[i];
+      if (entry.chapterIndex == chapterIndex && entry.fragment == element) {
+        return i;
+      }
+    }
+  }
+  for (var i = 0; i < entries.length; i++) {
+    if (entries[i].chapterIndex == chapterIndex) return i;
+  }
+  return -1;
+}
+
 /// The reading screen. It owns the book chrome (title, TOC, progress) and
 /// mounts either the Android WebView or the Flutter fallback.
 class ReaderScreen extends ConsumerStatefulWidget {
@@ -840,8 +864,10 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
                 ),
               )
               .toList();
-    final selectedEntry = entries.indexWhere(
-      (entry) => entry.chapterIndex == _chapterIndex,
+    final selectedEntry = tocSelectionIndex(
+      entries,
+      chapterIndex: _chapterIndex,
+      element: _element,
     );
     return Drawer(
       backgroundColor: readerBackground(

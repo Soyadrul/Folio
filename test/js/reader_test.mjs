@@ -1418,3 +1418,37 @@ test('trimming a chapter removes its scoped head styles', () => {
   assert.ok(css.includes('chapter-7'), 'kept chapter CSS stays');
   assert.ok(css.includes('chapter-8'), 'kept chapter CSS stays');
 });
+
+test('a scroll chapter that fits the viewport reports full progress', async () => {
+  const reader = loadReader();
+  reader.scroller.clientHeight = 600;
+  reader.scroller.clientWidth = 400;
+  reader.scroller._rect = { top: 0, bottom: 600, left: 0, right: 400 };
+  reader.folio.init(defaults());
+
+  addSection(reader, { index: 0, top: 0, height: 320 });
+  reader.posts.length = 0;
+  reader.folio.relayout();
+  await wait(20);
+
+  assert.equal(lastProgress(reader.posts).progress, 1);
+});
+
+test('a single-page book chapter reports full progress', async () => {
+  const reader = loadReader();
+  reader.scroller.clientWidth = 400;
+  reader.scroller.clientHeight = 600;
+  reader.scroller._rect = { top: 0, bottom: 600, left: 0, right: 400 };
+  reader.content.scrollWidth = 400;
+  reader.content.scrollHeight = 600;
+  reader.folio.init(defaults({ mode: 'book' }));
+
+  reader.folio.startChapter({ index: 0, hasPrev: false, hasNext: false });
+  reader.folio.endChapter();
+  placeSection(reader, 0, 0, 500);
+  reader.posts.length = 0;
+  reader.folio.relayout();
+  await wait(20);
+
+  assert.equal(lastProgress(reader.posts).progress, 1);
+});

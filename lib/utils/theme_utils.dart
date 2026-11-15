@@ -3,6 +3,8 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../models/app_settings.dart';
 
+export '../models/app_settings.dart' show kAvailableFonts;
+
 // ── Colour palettes ────────────────────────────────────────────────────────
 
 /// Returns the background colour for a given [ReadingMode] and system
@@ -39,22 +41,6 @@ Color readerTextColor(ReadingMode mode, Brightness systemBrightness) {
 }
 
 // ── Font helpers ───────────────────────────────────────────────────────────
-
-/// All font families available for selection in the Settings screen.
-const List<String> kAvailableFonts = [
-  'Merriweather',
-  'Lora',
-  'Playfair Display',
-  'Crimson Text',
-  'EB Garamond',
-  'PT Serif',
-  'Source Serif 4',
-  'Libre Baskerville',
-  'Roboto',
-  'Open Sans',
-  'Lato',
-  'Noto Sans',
-];
 
 /// Builds a [TextStyle] for the book body text using [GoogleFonts].
 TextStyle readerBodyTextStyle({

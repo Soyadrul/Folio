@@ -175,4 +175,13 @@ void main() {
     expect(changed.lineHeight, original.lineHeight);
     expect(changed.tapZones, original.tapZones);
   });
+  test('falls back to the default font when the saved family is unknown', () {
+    final settings = AppSettings.fromJson(const {
+      'fontFamily': 'Retired Font From 2024',
+    });
+    expect(settings.fontFamily, 'Merriweather');
+
+    final known = AppSettings.fromJson(const {'fontFamily': 'Lora'});
+    expect(known.fontFamily, 'Lora');
+  });
 }

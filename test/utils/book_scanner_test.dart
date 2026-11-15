@@ -131,10 +131,7 @@ void main() {
     await writeBook('second/b.epub', epub3Entries());
     final cachePath = p.join(tmp.path, 'cache', 'metadata.json');
 
-    final first = await scanFolderForBooks(
-      firstDir.path,
-      cachePath: cachePath,
-    );
+    final first = await scanFolderForBooks(firstDir.path, cachePath: cachePath);
     expect(first.cacheHits, 0);
 
     final second = await scanFolderForBooks(
@@ -147,5 +144,19 @@ void main() {
     final again = await scanFolderForBooks(firstDir.path, cachePath: cachePath);
     expect(again.books.single.title, 'Old Book');
     expect(again.cacheHits, 1);
+  });
+  test('reports a failed metadata scan and still lists the books', () async {
+    await writeBook('shelf/a.epub', epub2Entries());
+
+    final scan = await scanFolderForBooks(
+      tmp.path,
+      metadataLoader: () async => throw StateError('isolate failed'),
+    );
+
+    expect(scan.metadataFailed, isTrue);
+    expect(scan.books, hasLength(1));
+    expect(scan.books.single.title, 'a');
+    expect(scan.books.single.author, 'Unknown Author');
+    expect(scan.books.single.lastModifiedMs, greaterThan(0));
   });
 }

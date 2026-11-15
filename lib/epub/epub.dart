@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
+import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
 import 'package:crypto/crypto.dart';
@@ -253,12 +254,19 @@ class EpubLoader {
     Directory? cacheRoot,
     this.beforeReplace,
     EpubIsolateRunner? isolateRunner,
+    this.maxExtractBytes = defaultMaxExtractBytes,
+    this.maxExtractEntries = defaultMaxExtractEntries,
   }) : _cacheRoot = cacheRoot,
        _isolateRunner = isolateRunner ?? runOffIsolate;
 
   final Directory? _cacheRoot;
   final EpubIsolateRunner _isolateRunner;
   Future<Directory>? _resolvedRoot;
+
+  /// Extraction limits, overridable so tests can exercise the guards with a
+  /// small archive instead of a multi-gigabyte one.
+  final int maxExtractBytes;
+  final int maxExtractEntries;
 
   /// Test hook that runs while the previous extraction still exists.
   final Future<void> Function(Directory previous, Directory fresh)?
@@ -364,7 +372,16 @@ class EpubLoader {
       await temp.create(recursive: true);
       final epubPath = file.path;
       final targetPath = temp.path;
-      await _isolateRunner(() => _extractArchive(epubPath, targetPath));
+      final maxBytes = maxExtractBytes;
+      final maxEntries = maxExtractEntries;
+      await _isolateRunner(
+        () => _extractArchive(
+          epubPath,
+          targetPath,
+          maxBytes: maxBytes,
+          maxEntries: maxEntries,
+        ),
+      );
       await File(p.join(temp.path, '.folio-cache.json')).writeAsString(
         jsonEncode({
           'path': absolute,
@@ -473,8 +490,8 @@ class EpubLoader {
     }
   }
 
-  static const _maxExtractEntries = 20000;
-  static const _maxExtractBytes = 2 * 1024 * 1024 * 1024;
+  static const defaultMaxExtractEntries = 20000;
+  static const defaultMaxExtractBytes = 2 * 1024 * 1024 * 1024;
 
   /// Extracts [epubPath] into [targetPath], one entry at a time.
   ///
@@ -483,8 +500,10 @@ class EpubLoader {
   /// [_safeEntryPath] exactly as before.
   static Future<void> _extractArchive(
     String epubPath,
-    String targetPath,
-  ) async {
+    String targetPath, {
+    required int maxBytes,
+    required int maxEntries,
+  }) async {
     final InputFileStream input;
     try {
       input = InputFileStream(epubPath);
@@ -508,25 +527,31 @@ class EpubLoader {
       for (final entry in archive.files) {
         if (!entry.isFile) continue;
         entries++;
-        if (entries > _maxExtractEntries) {
+        if (entries > maxEntries) {
           throw EpubException(
             'This book contains too many files to open safely.',
           );
         }
-        extracted += entry.size;
-        if (extracted > _maxExtractBytes) {
+        // The declared size is a cheap early check, but a crafted archive can
+        // lie about it. The bounded stream counts the bytes that are actually
+        // decompressed and stops the write when the budget runs out.
+        if (entry.size > maxBytes - extracted) {
           throw EpubException('This book is too large to extract safely.');
         }
         final safe = _safeEntryPath(entry.name);
         if (safe == null) continue;
         final output = File(p.joinAll([targetPath, ...safe.split('/')]));
         await output.parent.create(recursive: true);
-        final stream = OutputFileStream(output.path);
+        final stream = _BoundedOutputStream(
+          OutputFileStream(output.path),
+          maxBytes - extracted,
+        );
         try {
           entry.writeContent(stream);
         } finally {
           await stream.close();
         }
+        extracted += stream.length;
       }
     } finally {
       await input.close();
@@ -686,6 +711,13 @@ class EpubLoader {
       if (item == null) continue;
       final resolved = resolver.resolve(item.href, basePath: opfRel);
       if (resolved.path == null) continue;
+      // A spine item that is a raster image or another binary file would be
+      // decoded as text and shown as garbage. Skip it instead of inventing a
+      // chapter that only contains replacement characters.
+      if (!_isHtmlDocument(item.mediaType, resolved.path!) &&
+          !_isSvgDocument(item.mediaType, resolved.path!)) {
+        continue;
+      }
       if (!seenSpinePaths.add(resolved.path!)) continue;
       final absolute = p.joinAll([cacheDir, ...resolved.path!.split('/')]);
       if (!await File(absolute).exists()) continue;
@@ -821,7 +853,6 @@ class EpubLoader {
     final cover = await _resolveCover(
       metadata: metadata,
       manifestItems: manifestItems,
-      tocId: _attribute(spine, 'toc'),
       chapters: titledChapters,
       cacheDir: cacheDir,
       opfRel: opfRel,
@@ -890,13 +921,17 @@ class EpubLoader {
           final before = entries.length;
           try {
             final document = html_parser.parse(await _readText(file));
-            final nav = document
-                .querySelectorAll('nav')
-                .where((n) => _hasTocType(n))
-                .firstOrNull;
+            final navs = document.querySelectorAll('nav');
+            // Prefer an explicit TOC nav. Some books only mark it with
+            // `role="doc-toc"`; a body fallback must not pull the landmarks
+            // or page-list links into the contents.
+            final nav =
+                navs.where((n) => _hasTocType(n)).firstOrNull ??
+                navs.where((n) => !_isAuxiliaryNav(n)).firstOrNull;
             final scope = nav ?? document.body;
             if (scope != null) {
               for (final anchor in scope.querySelectorAll('a')) {
+                if (nav == null && _insideAuxiliaryNav(anchor)) continue;
                 final href = anchor.attributes['href'];
                 if (href == null) continue;
                 var level = 0;
@@ -1005,7 +1040,6 @@ class EpubLoader {
   static Future<String?> _resolveCover({
     required XmlElement? metadata,
     required Map<String, _ManifestItem> manifestItems,
-    required String? tocId,
     required List<EpubChapter> chapters,
     required String cacheDir,
     required String opfRel,
@@ -1125,6 +1159,11 @@ class EpubLoader {
         lower.endsWith('.htm');
   }
 
+  static bool _isSvgDocument(String mediaType, String href) {
+    return mediaType.toLowerCase() == 'image/svg+xml' ||
+        href.toLowerCase().endsWith('.svg');
+  }
+
   static bool isEpubImagePath(String path) {
     final lower = path.toLowerCase();
     return lower.endsWith('.jpg') ||
@@ -1142,9 +1181,43 @@ class EpubLoader {
 
   static bool _hasTocType(dom.Element nav) {
     for (final key in nav.attributes.keys) {
-      if (key.toString().toLowerCase().endsWith('type')) {
-        final value = (nav.attributes[key] ?? '').toLowerCase();
-        if (value.split(RegExp(r'\s+')).contains('toc')) return true;
+      final name = key.toString().toLowerCase();
+      final tokens = (nav.attributes[key] ?? '').toLowerCase().split(
+        RegExp(r'\s+'),
+      );
+      if (name.endsWith('type') && tokens.contains('toc')) return true;
+      if (name == 'role' &&
+          (tokens.contains('doc-toc') || tokens.contains('toc'))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  static bool _isAuxiliaryNav(dom.Element nav) {
+    for (final key in nav.attributes.keys) {
+      final name = key.toString().toLowerCase();
+      final tokens = (nav.attributes[key] ?? '').toLowerCase().split(
+        RegExp(r'\s+'),
+      );
+      if (name.endsWith('type') &&
+          (tokens.contains('landmarks') || tokens.contains('page-list'))) {
+        return true;
+      }
+      if (name == 'role' &&
+          (tokens.contains('doc-landmarks') ||
+              tokens.contains('doc-pagelist') ||
+              tokens.contains('doc-page-list'))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  static bool _insideAuxiliaryNav(dom.Element anchor) {
+    for (var node = anchor.parent; node != null; node = node.parent) {
+      if (node.localName?.toLowerCase() == 'nav' && _isAuxiliaryNav(node)) {
+        return true;
       }
     }
     return false;
@@ -1199,4 +1272,66 @@ class _ManifestItem {
   final String href;
   final String mediaType;
   final String properties;
+}
+
+/// An [OutputStream] that stops once [remaining] bytes have been written.
+///
+/// The archive package streams an entry through this sink, so a ZIP whose
+/// declared size is smaller than its decompressed content cannot fill the
+/// cache before the extraction guard notices.
+class _BoundedOutputStream extends OutputStream {
+  _BoundedOutputStream(this._inner, this._remaining)
+    : super(byteOrder: ByteOrder.littleEndian);
+
+  final OutputFileStream _inner;
+  int _remaining;
+
+  @override
+  int get length => _inner.length;
+
+  @override
+  bool get isOpen => _inner.isOpen;
+
+  void _charge(int count) {
+    _remaining -= count;
+    if (_remaining < 0) {
+      throw EpubException('This book is too large to extract safely.');
+    }
+  }
+
+  @override
+  void flush() => _inner.flush();
+
+  @override
+  void clear() {
+    _inner.clear();
+  }
+
+  @override
+  Future<void> close() => _inner.close();
+
+  @override
+  void writeByte(int value) {
+    _charge(1);
+    _inner.writeByte(value);
+  }
+
+  @override
+  void writeBytes(List<int> bytes, {int? length}) {
+    _charge(length ?? bytes.length);
+    _inner.writeBytes(bytes, length: length);
+  }
+
+  @override
+  void writeStream(InputStream stream) {
+    final chunk = Uint8List(64 * 1024);
+    while (!stream.isEOS) {
+      final read = stream.readInto(chunk, 0, chunk.length);
+      if (read <= 0) break;
+      writeBytes(chunk, length: read);
+    }
+  }
+
+  @override
+  Uint8List subset(int start, [int? end]) => _inner.subset(start, end);
 }

@@ -55,12 +55,12 @@ String readerContentSecurityPolicy(String shellScript) {
       "form-action 'none'";
 }
 
-/// Whether the WebView may navigate to [url].
+/// Whether the WebView may navigate away from its current document.
 ///
 /// Only the very first document (the in-memory shell) is allowed. After that,
 /// every navigation is a book link that must be handled by Dart; letting the
 /// WebView follow it would replace the reader shell or leave the book.
-bool readerAllowsNavigation({required bool shellLoaded, WebUri? url}) {
+bool readerAllowsNavigation({required bool shellLoaded}) {
   if (!shellLoaded) return true;
   return false;
 }

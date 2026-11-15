@@ -139,4 +139,29 @@ void main() {
     expect(cover, isNotNull);
     expect(cover!.bytes, [1, 2, 3, 4]);
   });
+  test('fallback uses only the first linear spine chapter', () async {
+    final opf = epub2Opf
+        .replaceFirst('    <meta name="cover" content="cover-img"/>\n', '')
+        .replaceFirst('  <guide>\n', '  <guide></guide>\n  <!--\n')
+        .replaceFirst('  </guide>\n', '  -->\n')
+        .replaceFirst(
+          '<item id="cover-img" href="images/Cover.JPG" media-type="image/jpeg"/>',
+          '',
+        );
+    final first = chapterOne.replaceFirst(
+      '<p><img src="../images/pic.jpg" alt="pic"/></p>',
+      '',
+    );
+    final second = chapterTwo.replaceFirst(
+      '<body>',
+      '<body><p><img src="../images/pic.jpg" alt="pic"/></p>',
+    );
+    final file = await EpubFixture.write(tmp, {
+      ...epub2Entries(opf: opf),
+      'OEBPS/text/ch1.xhtml': first,
+      'OEBPS/text/ch2.xhtml': second,
+    });
+
+    expect(await readEpubCover(file.path), isNull);
+  });
 }

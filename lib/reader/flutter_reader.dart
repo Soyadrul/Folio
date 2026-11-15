@@ -342,7 +342,9 @@ class FlutterReaderState extends ConsumerState<FlutterReader>
     if (!_scroll.hasClients) return;
     final position = _scroll.position;
     final max = position.maxScrollExtent;
-    final progress = max <= 0 ? 0.0 : (position.pixels / max).clamp(0.0, 1.0);
+    // A chapter that fits the viewport has no scroll range and is fully
+    // visible, so it is fully read. Reporting 0 kept book progress off 100 %.
+    final progress = max <= 0 ? 1.0 : (position.pixels / max).clamp(0.0, 1.0);
     final viewport = position.viewportDimension;
     final pages = ((max + viewport) / viewport).ceil().clamp(1, 100000);
     final page = (position.pixels / viewport).floor() + 1;

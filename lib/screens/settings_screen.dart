@@ -528,7 +528,11 @@ class SettingsScreen extends ConsumerWidget {
       title: Text('Font family', style: _tileTextStyle(context)),
       trailing: DropdownButtonHideUnderline(
         child: DropdownButton<String>(
-          value: settings.fontFamily,
+          // A direct `AppSettings` constructor can still carry an unknown
+          // family; never hand the dropdown a value that is not in its items.
+          value: kAvailableFonts.contains(settings.fontFamily)
+              ? settings.fontFamily
+              : kAvailableFonts.first,
           style: GoogleFonts.lato(
             fontSize: 13,
             color: Theme.of(context).textTheme.bodyMedium?.color,

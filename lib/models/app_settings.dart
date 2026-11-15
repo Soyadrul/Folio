@@ -7,6 +7,25 @@ enum ReadingMode { auto, light, dark, sepia }
 /// How the text moves through the screen.
 enum ReaderMode { book, scroll }
 
+/// All font families available for selection in the Settings screen.
+///
+/// The canonical list lives here so saved settings can be validated against
+/// it; [theme_utils.dart] re-exports it for the UI helpers.
+const List<String> kAvailableFonts = [
+  'Merriweather',
+  'Lora',
+  'Playfair Display',
+  'Crimson Text',
+  'EB Garamond',
+  'PT Serif',
+  'Source Serif 4',
+  'Libre Baskerville',
+  'Roboto',
+  'Open Sans',
+  'Lato',
+  'Noto Sans',
+];
+
 /// All user-configurable settings for the app.
 ///
 /// Serialised to / from JSON and stored in [SharedPreferences].
@@ -245,7 +264,7 @@ class AppSettings {
 
   factory AppSettings.fromJson(Map<String, dynamic> json) => AppSettings(
     fontSize: _number(json['fontSize'], 18.0, minFontSize, maxFontSize),
-    fontFamily: json['fontFamily'] as String? ?? 'Merriweather',
+    fontFamily: _fontFamily(json['fontFamily']),
     lineHeight: _number(json['lineHeight'], 1.5, minLineHeight, maxLineHeight),
     textAlign: _enumValue(
       TextAlign.values,
@@ -290,6 +309,14 @@ class AppSettings {
     volumeButtonsChangeSpeed: json['volumeButtonsChangeSpeed'] as bool? ?? true,
     scrollAutoStart: json['scrollAutoStart'] as bool? ?? false,
   );
+
+  /// A saved font may come from an older version, a backup of another install
+  /// or a hand-edited preference. The Settings dropdown asserts when its value
+  /// is not one of its items, so unknown families fall back to the default.
+  static String _fontFamily(Object? raw) {
+    final value = raw is String ? raw : '';
+    return kAvailableFonts.contains(value) ? value : 'Merriweather';
+  }
 
   /// Reads a numeric setting, falling back to [fallback] for bad data and
   /// clamping old or hand-edited values to the supported range.

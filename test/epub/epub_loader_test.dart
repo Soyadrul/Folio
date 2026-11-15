@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
 
+import 'package:archive/archive.dart';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:folio/epub/epub.dart';
 import 'package:folio/epub/epub_metadata.dart';
@@ -555,6 +557,71 @@ void main() {
       actual,
       payload,
       reason: 'every byte of the streamed entry must match',
+    );
+  });
+  test('prefers a role="doc-toc" nav and ignores landmarks', () async {
+    const nav = '''
+<html xmlns="http://www.w3.org/1999/xhtml"
+      xmlns:epub="http://www.idpf.org/2007/ops">
+<body>
+  <nav epub:type="landmarks"><ol>
+    <li><a href="text/ch1.xhtml">Cover</a></li>
+  </ol></nav>
+  <nav epub:type="page-list"><ol>
+    <li><a href="text/ch2.xhtml">Page 1</a></li>
+  </ol></nav>
+  <nav role="doc-toc"><ol>
+    <li><a href="text/ch1.xhtml">First</a></li>
+    <li><a href="text/ch2.xhtml#sec">Second</a></li>
+  </ol></nav>
+</body>
+</html>
+''';
+    final entries = epub3Entries()..['OEBPS/nav.xhtml'] = nav;
+    final file = await EpubFixture.write(tmp, entries);
+    final book = await loader().load(file.path);
+
+    expect(book.toc.map((t) => t.title), ['First', 'Second']);
+  });
+
+  test('skips non-HTML spine items instead of decoding them as text', () async {
+    final opf = epub2Opf
+        .replaceFirst(
+          '<item id="css" href="style/book.css" media-type="text/css"/>',
+          '<item id="page" href="images/pic.jpg" media-type="image/jpeg"/>\n'
+              '    <item id="css" href="style/book.css" media-type="text/css"/>',
+        )
+        .replaceFirst(
+          '<itemref idref="ch2"/>',
+          '<itemref idref="ch2"/>\n    <itemref idref="page"/>',
+        );
+    final file = await EpubFixture.write(tmp, epub2Entries(opf: opf));
+    final book = await loader().load(file.path);
+
+    expect(book.chapters.map((c) => c.relPath), [
+      'OEBPS/text/ch1.xhtml',
+      'OEBPS/text/ch2.xhtml',
+    ]);
+  });
+
+  test('bounds extraction by the bytes actually written', () async {
+    final archive = Archive();
+    for (final entry in epub2Entries().entries) {
+      archive.addFile(ArchiveFile.string(entry.key, entry.value));
+    }
+    // The directory entry lies about its size. Either the archive decoder's
+    // own limit or the bounded output stream must stop it before the whole
+    // bomb reaches the cache.
+    archive.addFile(
+      ArchiveFile('OEBPS/bomb.bin', 4, List<int>.filled(64 * 1024, 7)),
+    );
+    final file = File(p.join(tmp.path, 'bomb.epub'));
+    await file.writeAsBytes(ZipEncoder().encode(archive));
+
+    final limited = EpubLoader(cacheRoot: cache, maxExtractBytes: 32 * 1024);
+    expect(
+      () => limited.load(file.path),
+      throwsA(anyOf(isA<EpubException>(), isA<FormatException>())),
     );
   });
 }

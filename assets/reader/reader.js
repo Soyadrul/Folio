@@ -40,7 +40,6 @@
     lastReport: 0,
     progressTimer: 0,
     lastNeed: null,
-    suppressScroll: false,
     chapterToken: 0,
     pending: null,
     missing: [],
@@ -294,13 +293,16 @@
     const el = currentSection();
     if (!el) return 0;
     if (isBook()) {
-      return state.pages > 1 ? state.page / (state.pages - 1) : 0;
+      // A chapter that fits on one page is fully visible, so it is fully read.
+      // Returning 0 here stopped overall progress short of 100 % in books
+      // whose final chapter is a single page.
+      return state.pages > 1 ? state.page / (state.pages - 1) : 1;
     }
     // The chapter can only scroll through `height - viewport` pixels. Using
     // the full height here made the value stop short of 1.0 and made a restore
     // land up to one screen away from the saved position.
     const range = Math.max(0, el.offsetHeight - viewportSize().height);
-    if (range <= 0) return 0;
+    if (range <= 0) return 1;
     return clamp((scroller().scrollTop - el.offsetTop) / range, 0, 1);
   }
 
@@ -562,15 +564,10 @@
   function scrollToPage(page, animate) {
     const size = viewportSize();
     const left = page * size.width;
-    state.suppressScroll = true;
     if (animate && state.settings.pageAnimation) {
       scroller().scrollTo({ left: left, behavior: 'smooth' });
-      setTimeout(function () {
-        state.suppressScroll = false;
-      }, 360);
     } else {
       scroller().scrollTo({ left: left, behavior: 'auto' });
-      state.suppressScroll = false;
     }
     state.page = page;
     post('pages', {

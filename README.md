@@ -90,7 +90,6 @@ Folio/
 │   └── google_fonts/                # TTF files used by the Flutter UI and Linux reader
 ├── test/                            # Dart/Flutter tests and JS reader tests
 ├── tool/                            # Scripts that fetch the bundled font files
-├── docs/                            # Audit notes and implementation plans
 ├── pubspec.yaml
 └── analysis_options.yaml
 ```

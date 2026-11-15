@@ -67,5 +67,9 @@ void main() {
         jsonDecode(await File(path).readAsString()) as Map<String, dynamic>;
     expect(decoded, isA<Map<String, dynamic>>());
     expect(decoded['entries'], isA<Map<String, dynamic>>());
+    final siblings = Directory(
+      p.dirname(path),
+    ).listSync().map((e) => p.basename(e.path));
+    expect(siblings.where((name) => name.endsWith('.tmp')), isEmpty);
   });
 }

@@ -16,6 +16,7 @@ class OpenFileService {
   final MethodChannel _channel;
   final _controller = StreamController<String>.broadcast();
   bool _started = false;
+  bool _disposed = false;
 
   /// File paths, in the order the intents arrived.
   Stream<String> get files => _controller.stream;
@@ -30,7 +31,7 @@ class OpenFileService {
     _channel.setMethodCallHandler(_handleCall);
     try {
       final files = await _channel.invokeMethod<List<dynamic>>('ready');
-      if (files == null) return;
+      if (files == null || _disposed) return;
       for (final path in files) {
         if (path is String && path.isNotEmpty) _controller.add(path);
       }
@@ -42,10 +43,15 @@ class OpenFileService {
   }
 
   Future<void> _handleCall(MethodCall call) async {
-    if (call.method != 'openFile') return;
+    if (_disposed || call.method != 'openFile') return;
     final path = call.arguments;
     if (path is String && path.isNotEmpty) _controller.add(path);
   }
 
-  Future<void> dispose() => _controller.close();
+  Future<void> dispose() async {
+    if (_disposed) return;
+    _disposed = true;
+    _channel.setMethodCallHandler(null);
+    await _controller.close();
+  }
 }

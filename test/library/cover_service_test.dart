@@ -179,4 +179,19 @@ void main() {
         .where((candidate) => candidate.path.endsWith('.none'));
     expect(markers, hasLength(1));
   });
+  test('reusing a thumbnail refreshes its last-used time', () async {
+    final book = bookFor(await writeWithCover(coverBytes()));
+    final path = await service().thumbnailFor(book);
+    final file = File(path!);
+    final old = DateTime.now().subtract(const Duration(days: 40));
+    await file.setLastModified(old);
+
+    final reused = await service().thumbnailFor(book);
+
+    expect(reused, path);
+    expect(
+      (await file.lastModified()).isAfter(old.add(const Duration(days: 1))),
+      isTrue,
+    );
+  });
 }

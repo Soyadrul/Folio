@@ -25,9 +25,11 @@ EpubMetadata readPackageMetadata(
   required String fallbackTitle,
 }) {
   final metadata = _firstElement(package, 'metadata');
-  final title = _textOf(_firstElement(metadata, 'title')).trim();
+  // Package documents routinely wrap titles across lines. Collapsing all
+  // whitespace keeps the library grid and the reader title on one line.
+  final title = _cleanText(_textOf(_firstElement(metadata, 'title')));
   final authors = _allElements(metadata, 'creator')
-      .map((element) => element.innerText.trim())
+      .map((element) => _cleanText(element.innerText))
       .where((author) => author.isNotEmpty)
       .toList();
   return EpubMetadata(
@@ -136,6 +138,8 @@ List<XmlElement> _allElements(XmlNode? root, String localName) {
 }
 
 String _textOf(XmlElement? element) => element?.innerText ?? '';
+
+String _cleanText(String value) => value.replaceAll(RegExp(r'\s+'), ' ').trim();
 
 String _decode(String value) {
   try {

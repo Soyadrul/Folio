@@ -135,6 +135,34 @@ ChapterContent rewriteChapterHtml(
     }
   }
 
+  // `<object data="cover.svg">` is a common way to embed an image. The loop
+  // below unwraps an object and would drop its data target, so turn an image
+  // object into an `<img>` first and let the normal URL rewrite handle it.
+  final imageObject = RegExp(
+    r'\.(png|jpe?g|jfif|gif|webp|svg|bmp|avif|tiff?)(?:[?#]|$)',
+    caseSensitive: false,
+  );
+  for (final object in document.querySelectorAll('object').toList()) {
+    final data = object.attributes['data'];
+    if (data == null || data.trim().isEmpty) continue;
+    final type = (object.attributes['type'] ?? '').toLowerCase();
+    final lower = data.toLowerCase();
+    if (!type.startsWith('image/') &&
+        !lower.startsWith('data:image/') &&
+        !imageObject.hasMatch(lower)) {
+      continue;
+    }
+    final image = document.createElement('img');
+    image.attributes['src'] = data;
+    for (final name in const ['alt', 'title', 'width', 'height', 'class']) {
+      final value = object.attributes[name];
+      if (value != null) image.attributes[name] = value;
+    }
+    final style = object.attributes['style'];
+    if (style != null) image.attributes['style'] = style;
+    object.replaceWith(image);
+  }
+
   // Elements that can execute code, navigate the WebView, or contact the
   // network. Book content is untrusted input, so they are removed outright
   // instead of being sanitised attribute by attribute.
@@ -513,11 +541,11 @@ String _stripRemoteImports(String css) {
 /// an unscoped import would leak rules into the reader chrome and other
 /// chapters.
 String _stripAllImports(String css) {
-  // Match the whole rule, including the closing `)` of `url(...)` and any
-  // media query that follows it. Leaving a stray `);` behind would make the
-  // next rule's selector invalid, silently dropping real book styles.
+  // Stop at a semicolon, a newline or a block delimiter. A CSS parser accepts
+  // an `@import` without its semicolon; the old `[^;]*` then swallowed every
+  // declaration up to the next rule's semicolon.
   final pattern = RegExp(
-    r'''@import\s+(?:url\([^)]*\)\s*|["'][^"']*["']\s*)?[^;]*;?''',
+    r'''@import\b[^;{}\r\n]*(?:;[ \t]*)?''',
     caseSensitive: false,
   );
   return css.replaceAll(pattern, '');
@@ -823,11 +851,12 @@ List<String> _splitTopLevel(String value, String separator) {
 }
 
 /// Declarations that would override the reader's theme.
+///
+/// The `font` and `background` shorthands carry more than a theme colour, so
+/// they are rewritten rather than dropped; see [_stripThemeDeclarations].
 const _themeProperties = {
   'color',
-  'background',
   'background-color',
-  'font',
   'font-family',
   'font-size',
 };
@@ -915,8 +944,112 @@ String _stripThemeDeclarations(String body) {
       continue;
     }
     final property = declaration.substring(0, colon).trim().toLowerCase();
+    final value = declaration.substring(colon + 1).trim();
+    if (property == 'font') {
+      final rewritten = _rewriteFontShorthand(value);
+      if (rewritten.isNotEmpty) kept.add(rewritten);
+      continue;
+    }
+    if (property == 'background') {
+      final rewritten = _rewriteBackgroundShorthand(value);
+      if (rewritten.isNotEmpty) kept.add(rewritten);
+      continue;
+    }
     if (_themeProperties.contains(property)) continue;
     kept.add(declaration);
   }
   return kept.join(';');
+}
+
+/// Turns `font: italic bold 16px/1.4 Georgia` into the longhands that do not
+/// fight the reader's theme. Dropping the whole shorthand also dropped the
+/// italics and weight it carried.
+String _rewriteFontShorthand(String value) {
+  final lower = value.toLowerCase().trim();
+  if (lower.isEmpty ||
+      lower == 'inherit' ||
+      lower == 'initial' ||
+      lower == 'unset' ||
+      lower == 'revert' ||
+      lower.contains('var(')) {
+    return '';
+  }
+  final declarations = <String>[];
+  var foundSize = false;
+  for (final token in _splitTopLevel(value, ' ')) {
+    final word = token.trim().toLowerCase();
+    if (word.isEmpty) continue;
+    if (_isFontSize(word)) {
+      foundSize = true;
+      break;
+    }
+    if (word == 'italic' || word == 'oblique') {
+      declarations.add('font-style: $word');
+    } else if (word == 'small-caps') {
+      declarations.add('font-variant: $word');
+    } else if (word == 'bold' ||
+        word == 'bolder' ||
+        word == 'lighter' ||
+        RegExp(r'^[1-9]00$').hasMatch(word)) {
+      declarations.add('font-weight: $word');
+    } else if (word.endsWith('condensed') || word.endsWith('expanded')) {
+      declarations.add('font-stretch: $word');
+    }
+  }
+  // Without a size the statement was not a valid font shorthand. Keeping a
+  // stray weight alone is harmless but adds noise.
+  return foundSize ? declarations.join('; ') : '';
+}
+
+bool _isFontSize(String token) {
+  // `16px/1.4` is a size followed by the line height; only the part before
+  // the slash identifies the size.
+  final slash = token.indexOf('/');
+  final size = slash < 0 ? token : token.substring(0, slash);
+  if (RegExp(
+    r'^(?:[+-]?(?:\d+\.?\d*|\.\d+)(?:px|em|rem|%|pt|pc|in|cm|mm|ex|ch|vw|vh|vmin|vmax|q)|0)$',
+  ).hasMatch(size)) {
+    return true;
+  }
+  return const {
+        'xx-small',
+        'x-small',
+        'small',
+        'medium',
+        'large',
+        'x-large',
+        'xx-large',
+        'xxx-large',
+        'smaller',
+        'larger',
+      }.contains(token) ||
+      token.startsWith('calc(') ||
+      token.startsWith('min(') ||
+      token.startsWith('max(') ||
+      token.startsWith('clamp(');
+}
+
+/// Keeps the image layers of a `background` shorthand and drops its colour.
+/// Emitting `background-image` preserves a publisher's texture or gradient
+/// without letting it set the page colour.
+String _rewriteBackgroundShorthand(String value) {
+  final layers = <String>[];
+  for (final layer in _splitTopLevel(value, ',')) {
+    final images = <String>[];
+    for (final token in _splitTopLevel(layer.trim(), ' ')) {
+      final word = token.trim();
+      final lower = word.toLowerCase();
+      if (lower.startsWith('url(') ||
+          lower.contains('gradient(') ||
+          lower.startsWith('image(') ||
+          lower.startsWith('image-set(') ||
+          lower.startsWith('cross-fade(') ||
+          lower.startsWith('element(')) {
+        images.add(word);
+      }
+    }
+    if (images.isNotEmpty) layers.add(images.join(' '));
+  }
+  if (layers.isEmpty) return '';
+  return 'background-image: ${layers.join(', ')}';
 }

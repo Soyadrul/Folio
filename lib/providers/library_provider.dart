@@ -169,7 +169,11 @@ class LibraryNotifier extends Notifier<LibraryState> {
     }
 
     if (persist) {
+      // A newer scan may have started while the permission or directory check
+      // was in flight. Only the newest scan may record the folder it was given.
+      if (token != _scanToken) return;
       final prefs = await SharedPreferences.getInstance();
+      if (token != _scanToken) return;
       await prefs.setString(_kLibraryFolderKey, path);
     }
 
@@ -216,11 +220,21 @@ class LibraryNotifier extends Notifier<LibraryState> {
   }
 
   String? _warningFor(LibraryScan scan) {
-    if (scan.skippedFolders == 0) return null;
-    final count = scan.skippedFolders;
-    final folders = count == 1 ? 'One folder' : '$count folders';
-    return '$folders could not be read and were skipped. '
-        'Check the storage permission or folder access.';
+    final warnings = <String>[];
+    if (scan.metadataFailed) {
+      warnings.add(
+        'Book details could not be read; showing file names instead.',
+      );
+    }
+    if (scan.skippedFolders > 0) {
+      final count = scan.skippedFolders;
+      final folders = count == 1 ? 'One folder' : '$count folders';
+      warnings.add(
+        '$folders could not be read and were skipped. '
+        'Check the storage permission or folder access.',
+      );
+    }
+    return warnings.isEmpty ? null : warnings.join(' ');
   }
 
   /// Merges positions persisted by the reader into freshly scanned books.

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:folio/utils/open_file_service.dart';
@@ -95,5 +97,38 @@ void main() {
     await service.start();
 
     expect(calls, 1);
+  });
+  test('disposing before the queued files arrive does not throw', () async {
+    final received = <String>[];
+    service.files.listen(received.add);
+    final gate = Completer<void>();
+
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      await gate.future;
+      return <String>['/cache/queued.epub'];
+    });
+
+    final starting = service.start();
+    await service.dispose();
+    gate.complete();
+
+    await expectLater(starting, completes);
+    await Future<void>.delayed(Duration.zero);
+    expect(received, isEmpty);
+  });
+
+  test('an intent after dispose is ignored', () async {
+    messenger.setMockMethodCallHandler(channel, (call) async => <String>[]);
+    await service.start();
+    await service.dispose();
+
+    await messenger.handlePlatformMessage(
+      channel.name,
+      const StandardMethodCodec().encodeMethodCall(
+        const MethodCall('openFile', '/cache/late.epub'),
+      ),
+      (_) {},
+    );
+    await Future<void>.delayed(Duration.zero);
   });
 }

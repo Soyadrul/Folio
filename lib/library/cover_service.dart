@@ -88,6 +88,21 @@ class CoverService {
     }
   }
 
+  /// Cache maintenance prunes thumbnails by modification time, so a reused
+  /// cover must look recently used. Writing the timestamp at most once a day
+  /// keeps a library open from touching every card.
+  static Future<void> _touch(File file) async {
+    try {
+      final stat = await file.stat();
+      if (DateTime.now().difference(stat.modified) < const Duration(days: 1)) {
+        return;
+      }
+      await file.setLastModified(DateTime.now());
+    } on FileSystemException {
+      // A read-only cache still serves the existing thumbnail.
+    }
+  }
+
   Future<String?> _build({
     required String bookPath,
     required String destination,
@@ -96,8 +111,15 @@ class CoverService {
     // the same folder again does not unzip and decode it every time.
     final missingMarker = File('$destination.none');
     try {
-      if (await File(destination).exists()) return destination;
-      if (await missingMarker.exists()) return null;
+      final existing = File(destination);
+      if (await existing.exists()) {
+        await _touch(existing);
+        return destination;
+      }
+      if (await missingMarker.exists()) {
+        await _touch(missingMarker);
+        return null;
+      }
 
       final targetWidth = thumbnailWidth;
       final rendered = await _withSlot(() async {

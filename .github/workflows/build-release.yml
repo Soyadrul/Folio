@@ -437,7 +437,7 @@ jobs:
               echo "  - Keystore location: android/app/release-keystore.jks"
               echo "  - Key properties: android/key.properties"
               # echo "  - Key alias: $KEY_ALIAS"
-              echo "  - Store file path: release-keystore.jks (resolves from android/app/)"
+              echo "  - Store file path: app/release-keystore.jks (resolves from android/)"
               
               # Verify keystore file exists before building
               if [ -f "android/app/release-keystore.jks" ]; then

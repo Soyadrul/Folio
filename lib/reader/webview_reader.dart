@@ -171,6 +171,11 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
   /// created instead of leaving the reader on a blank page.
   int _webViewGeneration = 0;
 
+  /// Incremented for every chapter load. The renderer death handler bumps it
+  /// too, so an in-flight load that finishes afterwards cannot clear the
+  /// "loading" flag of the replacement load or drain its queued chapter.
+  int _chapterLoadGeneration = 0;
+
   /// Keeps each `evaluateJavascript` call small. A single-file book can have
   /// chapters several megabytes long, and handing all of that to the
   /// JavaScript bridge at once can exhaust it.
@@ -448,6 +453,7 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
     }
     _loadingChapter = true;
     _requestedChapter = index;
+    final generation = ++_chapterLoadGeneration;
     try {
       final ChapterContent? content;
       try {
@@ -457,6 +463,10 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
         return;
       }
       if (content == null) return;
+      // The renderer may have died while the chapter was being read. Its
+      // replacement already restarted the load; do not install this content
+      // over it.
+      if (generation != _chapterLoadGeneration) return;
       _currentChapter = index;
       _lastProgress = progress;
       _lastElement = element;
@@ -485,21 +495,24 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
       final next = widget.document.nextReadingIndex(index);
       if (next != null) _background(_contentFor(next));
     } finally {
-      _loadingChapter = false;
-      final pending = _pendingChapter;
-      if (pending != null) {
-        _pendingChapter = null;
-        final pendingProgress = _pendingProgress;
-        final pendingElement = _pendingElement;
-        _pendingProgress = 0;
-        _pendingElement = null;
-        _background(
-          _loadChapter(
-            pending,
-            progress: pendingProgress,
-            element: pendingElement,
-          ),
-        );
+      // A stale load must not clear the flag of the load that replaced it.
+      if (generation == _chapterLoadGeneration) {
+        _loadingChapter = false;
+        final pending = _pendingChapter;
+        if (pending != null) {
+          _pendingChapter = null;
+          final pendingProgress = _pendingProgress;
+          final pendingElement = _pendingElement;
+          _pendingProgress = 0;
+          _pendingElement = null;
+          _background(
+            _loadChapter(
+              pending,
+              progress: pendingProgress,
+              element: pendingElement,
+            ),
+          );
+        }
       }
     }
   }
@@ -767,6 +780,9 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
         _shellReady = false;
         _shellLoaded = false;
         _controller = null;
+        // Invalidate the load that was running when the renderer died; its
+        // `finally` must not touch the state of the replacement load.
+        _chapterLoadGeneration++;
         _loadingChapter = false;
         _pendingChapter = null;
         _pendingProgress = 0;
@@ -784,10 +800,7 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
         });
       },
       shouldOverrideUrlLoading: (controller, action) async {
-        final allowed = readerAllowsNavigation(
-          shellLoaded: _shellLoaded,
-          url: action.request.url,
-        );
+        final allowed = readerAllowsNavigation(shellLoaded: _shellLoaded);
         return allowed
             ? NavigationActionPolicy.ALLOW
             : NavigationActionPolicy.CANCEL;
