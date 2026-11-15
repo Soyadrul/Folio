@@ -65,7 +65,11 @@ void main() {
 
   test('the Linux reader families ship an offline TTF', () {
     for (final family in kAvailableFonts) {
-      final file = File('assets/google_fonts/$family-Regular.ttf');
+      // google_fonts looks for `<FamilyWithoutSpaces>-<Variant>.ttf`, so the
+      // asset name must not keep the display name's spaces.
+      final file = File(
+        'assets/google_fonts/${family.replaceAll(' ', '')}-Regular.ttf',
+      );
       expect(file.existsSync(), isTrue, reason: file.path);
       expect(file.lengthSync(), greaterThan(10000), reason: file.path);
     }
@@ -76,10 +80,10 @@ void main() {
       'Lato-Regular',
       'Lato-Bold',
       'Lato-Italic',
-      'Playfair Display-Regular',
-      'Playfair Display-SemiBold',
-      'Playfair Display-Bold',
-      'Playfair Display-Italic',
+      'PlayfairDisplay-Regular',
+      'PlayfairDisplay-SemiBold',
+      'PlayfairDisplay-Bold',
+      'PlayfairDisplay-Italic',
     ]) {
       final file = File('assets/google_fonts/$name.ttf');
       expect(file.existsSync(), isTrue, reason: file.path);
@@ -91,9 +95,7 @@ void main() {
     for (final family in kAvailableFonts) {
       final faces = kReaderFontFaces[family]!;
       expect(
-        faces.where(
-          (face) => face.unicodeRange?.contains('U+0100') ?? false,
-        ),
+        faces.where((face) => face.unicodeRange?.contains('U+0100') ?? false),
         isNotEmpty,
         reason: '$family has no latin-ext face',
       );

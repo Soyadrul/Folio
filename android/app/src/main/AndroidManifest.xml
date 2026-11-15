@@ -53,13 +53,29 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <!-- Some file managers report EPUBs as octet-stream; the path
-                     pattern makes the extension match in that case. -->
+                <!-- Some file managers report EPUBs as octet-stream. Android
+                     only applies pathPattern when the filter also declares a
+                     host, so host="*" is required; without it Folio claimed
+                     every octet-stream file. Content URIs often have no
+                     extension, so this filter stays best-effort. -->
                 <data
                     android:scheme="content"
                     android:mimeType="application/octet-stream"
+                    android:host="*"
                     android:pathPattern=".*\\.epub" />
-                <data android:scheme="file" android:pathPattern=".*\\.epub" />
+                <data
+                    android:scheme="content"
+                    android:mimeType="application/octet-stream"
+                    android:host="*"
+                    android:pathPattern=".*\\.EPUB" />
+                <data
+                    android:scheme="file"
+                    android:host="*"
+                    android:pathPattern=".*\\.epub" />
+                <data
+                    android:scheme="file"
+                    android:host="*"
+                    android:pathPattern=".*\\.EPUB" />
             </intent-filter>
         </activity>
 

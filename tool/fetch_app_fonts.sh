@@ -16,23 +16,24 @@ fetch() {
   printf '%s: %s bytes\n' "$output" "$(wc -c < "assets/google_fonts/${output}.ttf")"
 }
 
-# Every family the Linux reader can select.
+# Every family the Linux reader can select. Output names must not contain
+# spaces: google_fonts looks for `<FamilyWithoutSpaces>-<Variant>.ttf`.
 fetch 'Merriweather'                 'Merriweather-Regular'
 fetch 'Lora'                         'Lora-Regular'
-fetch 'Playfair+Display'             'Playfair Display-Regular'
-fetch 'Crimson+Text'                 'Crimson Text-Regular'
-fetch 'EB+Garamond'                  'EB Garamond-Regular'
-fetch 'PT+Serif'                     'PT Serif-Regular'
-fetch 'Source+Serif+4'               'Source Serif 4-Regular'
-fetch 'Libre+Baskerville'            'Libre Baskerville-Regular'
+fetch 'Playfair+Display'             'PlayfairDisplay-Regular'
+fetch 'Crimson+Text'                 'CrimsonText-Regular'
+fetch 'EB+Garamond'                  'EBGaramond-Regular'
+fetch 'PT+Serif'                     'PTSerif-Regular'
+fetch 'Source+Serif+4'               'SourceSerif4-Regular'
+fetch 'Libre+Baskerville'            'LibreBaskerville-Regular'
 fetch 'Roboto'                       'Roboto-Regular'
-fetch 'Open+Sans'                    'Open Sans-Regular'
+fetch 'Open+Sans'                    'OpenSans-Regular'
 fetch 'Lato'                         'Lato-Regular'
-fetch 'Noto+Sans'                    'Noto Sans-Regular'
+fetch 'Noto+Sans'                    'NotoSans-Regular'
 
 # Weights the app chrome asks for in theme_utils.dart and the screens.
 fetch 'Lato:700'                     'Lato-Bold'
 fetch 'Lato:italic'                  'Lato-Italic'
-fetch 'Playfair+Display:600'         'Playfair Display-SemiBold'
-fetch 'Playfair+Display:700'         'Playfair Display-Bold'
-fetch 'Playfair+Display:italic'      'Playfair Display-Italic'
+fetch 'Playfair+Display:600'         'PlayfairDisplay-SemiBold'
+fetch 'Playfair+Display:700'         'PlayfairDisplay-Bold'
+fetch 'Playfair+Display:italic'      'PlayfairDisplay-Italic'

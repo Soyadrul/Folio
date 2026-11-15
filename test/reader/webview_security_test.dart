@@ -15,6 +15,14 @@ void main() {
     expect(settings.allowUniversalAccessFromFileURLs, isFalse);
   });
 
+  test('blocks network loads in the offline release build', () {
+    final settings = readerWebViewSettings();
+    // Android throws SecurityException from setBlockNetworkLoads(false) when
+    // the app has no INTERNET permission, which aborts platform-view creation.
+    // `true` is always allowed and local file/data loads still work.
+    expect(settings.blockNetworkLoads, isTrue);
+  });
+
   test('CSP allows only local resources and the shell script hash', () {
     const script = 'console.log("folio");';
     final csp = readerContentSecurityPolicy(script);

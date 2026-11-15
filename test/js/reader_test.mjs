@@ -1205,3 +1205,172 @@ test('pointercancel clears the gesture and pauses auto-scroll', () => {
   });
   assert.equal(posts.length, posted, 'a cancelled gesture is not a tap');
 });
+
+/* ── Scroll-mode chapter trimming ──────────────────────────────────── */
+
+function sectionsOf(reader) {
+  return reader.document.querySelectorAll('.folio-chapter');
+}
+
+function sectionIndexes(reader) {
+  return sectionsOf(reader).map((section) =>
+    Number(section.getAttribute('data-folio-index'))
+  );
+}
+
+function placeSection(reader, index, top, height = 1200) {
+  const section = sectionsOf(reader).find(
+    (el) => Number(el.getAttribute('data-folio-index')) === index
+  );
+  assert.ok(section, `chapter ${index} is on the page`);
+  section.offsetTop = top;
+  section.offsetHeight = height;
+  section._rect = { top, bottom: top + height, left: 0, right: 400 };
+}
+
+function scrollReader(reader) {
+  return reader.scroller;
+}
+
+test('a chapter trimmed above the reader can be prepended again', () => {
+  const reader = loadReader();
+  const scroller = scrollReader(reader);
+  scroller.clientHeight = 600;
+  scroller.clientWidth = 400;
+  reader.folio.init(defaults());
+
+  reader.folio.startChapter({ index: 5, hasPrev: true, hasNext: true });
+  reader.folio.endChapter();
+  placeSection(reader, 5, 0);
+  for (const index of [6, 7, 8]) {
+    reader.folio.startChapter({
+      index,
+      target: 'append',
+      hasPrev: true,
+      hasNext: true,
+    });
+    reader.folio.endChapter();
+    placeSection(reader, index, (index - 5) * 1200);
+  }
+  scroller.scrollHeight = 4800;
+
+  // Reading into chapter 8 trims chapters 5 and 6.
+  scroller.scrollTop = 3700;
+  scroller.dispatch('scroll');
+  assert.deepEqual(sectionIndexes(reader), [7, 8]);
+  sectionIndexes(reader).forEach((index, position) => {
+    placeSection(reader, index, position * 1200);
+  });
+
+  reader.posts.length = 0;
+  scroller.scrollTop = 100;
+  scroller.dispatch('scroll');
+  assert.ok(
+    reader.posts.some(
+      (post) => post.type === 'needChapter' && post.direction === -1
+    ),
+    'the shell asks for the chapter above the trimmed range'
+  );
+
+  reader.folio.startChapter({
+    index: 6,
+    target: 'prepend',
+    hasPrev: true,
+    hasNext: true,
+  });
+  reader.folio.appendChapterHtml('<p>chapter six</p>');
+  reader.folio.endChapter();
+  assert.ok(
+    sectionIndexes(reader).includes(6),
+    'chapter 6 is prepended above chapter 7'
+  );
+});
+
+test('a chapter trimmed below the reader can be appended again', () => {
+  const reader = loadReader();
+  const scroller = scrollReader(reader);
+  scroller.clientHeight = 600;
+  scroller.clientWidth = 400;
+  reader.folio.init(defaults());
+
+  reader.folio.startChapter({ index: 5, hasPrev: true, hasNext: true });
+  reader.folio.endChapter();
+  placeSection(reader, 5, 0);
+  for (const index of [6, 7, 8, 9]) {
+    reader.folio.startChapter({
+      index,
+      target: 'append',
+      hasPrev: true,
+      hasNext: true,
+    });
+    reader.folio.endChapter();
+    placeSection(reader, index, (index - 5) * 1200);
+  }
+  scroller.scrollHeight = 6000;
+
+  // Reading in chapter 6 trims chapters 8 and 9.
+  scroller.scrollTop = 1300;
+  scroller.dispatch('scroll');
+  assert.deepEqual(sectionIndexes(reader), [5, 6, 7]);
+  sectionIndexes(reader).forEach((index, position) => {
+    placeSection(reader, index, position * 1200);
+  });
+
+  reader.folio.startChapter({
+    index: 8,
+    target: 'append',
+    hasPrev: true,
+    hasNext: true,
+  });
+  reader.folio.appendChapterHtml('<p>chapter eight</p>');
+  reader.folio.endChapter();
+  assert.ok(
+    sectionIndexes(reader).includes(8),
+    'chapter 8 is re-appended below chapter 7'
+  );
+});
+
+test('trimming the first chapter restores the previous flag from the DOM', async () => {
+  const reader = loadReader();
+  const scroller = scrollReader(reader);
+  scroller.clientHeight = 600;
+  scroller.clientWidth = 400;
+  reader.folio.init(defaults());
+
+  // Build [0, 1, 2, 3] by prepending down from the last chapter, so the
+  // shell's own `hasPrev` ends up false even though the first chapters on
+  // the page are not the start of the book.
+  reader.folio.startChapter({ index: 3, hasPrev: true, hasNext: false });
+  reader.folio.endChapter();
+  placeSection(reader, 3, 3600);
+  for (const index of [2, 1, 0]) {
+    reader.folio.startChapter({
+      index,
+      target: 'prepend',
+      hasPrev: index > 0,
+      hasNext: true,
+    });
+    reader.folio.endChapter();
+    placeSection(reader, index, index * 1200);
+  }
+  scroller.scrollHeight = 4800;
+
+  // A relayout trims chapters 0 and 1 because chapter 3 is visible.
+  reader.folio.relayout();
+  await wait(20);
+  assert.deepEqual(sectionIndexes(reader), [2, 3]);
+  sectionIndexes(reader).forEach((index, position) => {
+    placeSection(reader, index, position * 1200);
+  });
+  scroller.scrollHeight = 2400;
+
+  reader.posts.length = 0;
+  scroller.scrollTop = 100;
+  scroller.dispatch('scroll');
+  assert.ok(
+    reader.posts.some(
+      (post) => post.type === 'needChapter' && post.direction === -1
+    ),
+    'chapter 1 can be requested again after chapter 0 was trimmed'
+  );
+});

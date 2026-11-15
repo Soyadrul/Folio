@@ -250,6 +250,27 @@
     }) || null;
   }
 
+  // Keep the loaded range and the edge flags describing what is actually in
+  // the DOM. Trimming removes sections, and appending/prepending only updates
+  // one end of the range, so deriving them from the page is the only reliable
+  // way to know which neighbour to request next.
+  function syncLoadedRange() {
+    const list = sections();
+    if (list.length === 0) {
+      state.loadedStart = -1;
+      state.loadedEnd = -1;
+      state.hasPrev = false;
+      state.hasNext = false;
+      return;
+    }
+    const first = list[0];
+    const last = list[list.length - 1];
+    state.loadedStart = Number(first.getAttribute('data-folio-index'));
+    state.loadedEnd = Number(last.getAttribute('data-folio-index'));
+    state.hasPrev = first.getAttribute('data-folio-has-prev') === '1';
+    state.hasNext = last.getAttribute('data-folio-has-next') === '1';
+  }
+
   function currentSection() {
     const list = sections();
     if (list.length === 0) return null;
@@ -486,6 +507,7 @@
         }
       }
     }
+    syncLoadedRange();
     invalidateLayout();
   }
 
@@ -658,6 +680,8 @@
     const el = document.createElement('section');
     el.className = 'folio-chapter';
     el.setAttribute('data-folio-index', String(payload.index));
+    el.setAttribute('data-folio-has-prev', payload.hasPrev ? '1' : '0');
+    el.setAttribute('data-folio-has-next', payload.hasNext ? '1' : '0');
     if (payload.bodyClass) el.className += ' ' + payload.bodyClass;
     if (payload.bodyStyle) el.setAttribute('style', payload.bodyStyle);
     if (payload.language) el.setAttribute('lang', payload.language);
@@ -697,6 +721,8 @@
       bodyClass: payload.bodyClass,
       bodyStyle: payload.bodyStyle,
       language: payload.language,
+      hasPrev: payload.hasPrev,
+      hasNext: payload.hasNext,
     });
   }
 
@@ -810,8 +836,7 @@
       content().appendChild(el);
       mergeHead(payload);
       normalizeSectionScale(el);
-      state.loadedEnd = payload.index;
-      state.hasNext = !!payload.hasNext;
+      syncLoadedRange();
       // If auto-scroll is running, let it continue into the new content.
       if (state.auto.running) {
         state.auto.pos = scroller().scrollTop;
@@ -827,8 +852,7 @@
     content().insertBefore(el, current);
     mergeHead(payload);
     normalizeSectionScale(el);
-    state.loadedStart = payload.index;
-    state.hasPrev = !!payload.hasPrev;
+    syncLoadedRange();
     if (!isBook()) {
       const delta = scroller().scrollHeight - before;
       scroller().scrollTop += delta;

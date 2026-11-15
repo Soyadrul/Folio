@@ -23,6 +23,11 @@ InAppWebViewSettings readerWebViewSettings({bool inspectable = false}) {
     disableVerticalScroll: false,
     disableHorizontalScroll: false,
     mediaPlaybackRequiresUserGesture: true,
+    // The app has no INTERNET permission. Android throws SecurityException
+    // from setBlockNetworkLoads(false) without it, which prevents the platform
+    // view from being created in release builds. `true` is always allowed and
+    // file/data loads (the only ones the reader uses) are unaffected.
+    blockNetworkLoads: true,
     isInspectable: inspectable,
   );
 }

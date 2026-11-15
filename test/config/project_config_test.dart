@@ -74,10 +74,7 @@ void main() {
     // A silent key.properties/Gradle fallback must not reach a release.
     expect(workflow, contains('if [ ! -f "android/key.properties" ]'));
     expect(workflow, contains('certificate SHA-256 digest'));
-    expect(
-      workflow,
-      contains('not signed with the configured release key'),
-    );
+    expect(workflow, contains('not signed with the configured release key'));
   });
 
   test('the release manifest does not request INTERNET', () {
@@ -96,6 +93,27 @@ void main() {
         contains('android.permission.INTERNET'),
       );
     }
+  });
+
+  test('EPUB path filters declare a host so Android applies them', () {
+    final manifest = File(
+      'android/app/src/main/AndroidManifest.xml',
+    ).readAsStringSync();
+    final filters = RegExp(
+      r'<data\b[^>]*android:pathPattern[^>]*>',
+    ).allMatches(manifest).map((match) => match.group(0)!).toList();
+
+    expect(filters, isNotEmpty);
+    for (final filter in filters) {
+      // Android ignores path/pathPattern/pathPrefix unless the filter also
+      // declares a host, which made Folio accept every octet-stream file.
+      expect(
+        filter,
+        contains('android:host="*"'),
+        reason: 'pathPattern is ignored without a host: $filter',
+      );
+    }
+    expect(manifest, contains(r'android:pathPattern=".*\\.EPUB"'));
   });
 
   test('runtime font fetching is disabled before the first frame', () {

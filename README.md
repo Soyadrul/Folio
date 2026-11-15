@@ -255,7 +255,9 @@ reader assets are bundled.
 
 **Adding more fonts** – add a [Google Fonts](https://fonts.google.com/) name to
 `kAvailableFonts` in `lib/utils/theme_utils.dart`, bundle its TTF in
-`assets/google_fonts/`, and add the matching WOFF2 faces to
+`assets/google_fonts/` (name it `<FamilyWithoutSpaces>-<Variant>.ttf`, because
+`google_fonts` looks the asset up by the family name with spaces removed), and
+add the matching WOFF2 faces to
 `kReaderFontFaces` in `lib/reader/reader_fonts.dart` plus
 `assets/reader/fonts/`. The helper scripts in `tool/` fetch the font files;
 runtime fetching is disabled.
