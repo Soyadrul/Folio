@@ -147,6 +147,17 @@ void main() {
     expect(source, contains("'P'.code.toByte()"));
   });
 
+  test('shared file freshness queries the document mtime column', () {
+    final source = File(
+      'android/app/src/main/kotlin/com/github/Soyadrul/Folio/MainActivity.kt',
+    ).readAsStringSync();
+    // DocumentsContract has no getDocumentLastModified() helper; the mtime is
+    // a query column. Guard the API so the Android build cannot regress to a
+    // compile error.
+    expect(source, contains('DocumentsContract.Document.COLUMN_LAST_MODIFIED'));
+    expect(source, isNot(contains('getDocumentLastModified')));
+  });
+
   test('the signing log names the path Gradle actually resolves', () {
     final workflow = File(
       '.github/workflows/build-release.yml',

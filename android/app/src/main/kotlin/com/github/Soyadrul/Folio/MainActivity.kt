@@ -246,7 +246,20 @@ class MainActivity : FlutterActivity() {
     /** Last-modified time reported by a documents provider, when available. */
     private fun sourceModified(uri: Uri): Long? {
         return try {
-            DocumentsContract.getDocumentLastModified(contentResolver, uri)
+            // DocumentsContract exposes the mtime as a query column, not as a
+            // helper method. Providers that do not include it yield null, and
+            // isCurrent() then falls back to comparing sizes.
+            val column = DocumentsContract.Document.COLUMN_LAST_MODIFIED
+            contentResolver.query(uri, arrayOf(column), null, null, null)
+                ?.use { cursor ->
+                    if (!cursor.moveToFirst()) return null
+                    val index = cursor.getColumnIndex(column)
+                    if (index < 0 || cursor.isNull(index)) {
+                        null
+                    } else {
+                        cursor.getLong(index)
+                    }
+                }
         } catch (_: Exception) {
             null
         }
