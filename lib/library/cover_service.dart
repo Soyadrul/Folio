@@ -64,7 +64,11 @@ class CoverService {
 
     final signature = '${stat.size}:${stat.modified.millisecondsSinceEpoch}';
     final memo = _memo[book.path];
-    if (memo != null && memo.signature == signature) return memo.path;
+    if (memo != null && memo.signature == signature) {
+      final cached = memo.path;
+      if (cached != null) await _touch(File(cached));
+      return cached;
+    }
 
     final root = await _root();
     final key = sha1

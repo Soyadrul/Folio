@@ -611,7 +611,7 @@ void main() {
     }
     // The directory entry lies about its size. Either the archive decoder's
     // own limit or the bounded output stream must stop it before the whole
-    // bomb reaches the cache.
+    // bomb reaches the cache, and both surface as the loader's own error.
     archive.addFile(
       ArchiveFile('OEBPS/bomb.bin', 4, List<int>.filled(64 * 1024, 7)),
     );
@@ -619,9 +619,6 @@ void main() {
     await file.writeAsBytes(ZipEncoder().encode(archive));
 
     final limited = EpubLoader(cacheRoot: cache, maxExtractBytes: 32 * 1024);
-    expect(
-      () => limited.load(file.path),
-      throwsA(anyOf(isA<EpubException>(), isA<FormatException>())),
-    );
+    expect(() => limited.load(file.path), throwsA(isA<EpubException>()));
   });
 }

@@ -548,6 +548,11 @@ class EpubLoader {
         );
         try {
           entry.writeContent(stream);
+        } on ArchiveLimitException {
+          // The archive package enforces the entry's declared size while it
+          // decompresses. Translate its exception so callers only have to
+          // handle the loader's own error type.
+          throw EpubException('This book is too large to extract safely.');
         } finally {
           await stream.close();
         }

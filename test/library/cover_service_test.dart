@@ -181,12 +181,13 @@ void main() {
   });
   test('reusing a thumbnail refreshes its last-used time', () async {
     final book = bookFor(await writeWithCover(coverBytes()));
-    final path = await service().thumbnailFor(book);
+    final covers = service();
+    final path = await covers.thumbnailFor(book);
     final file = File(path!);
     final old = DateTime.now().subtract(const Duration(days: 40));
     await file.setLastModified(old);
 
-    final reused = await service().thumbnailFor(book);
+    final reused = await covers.thumbnailFor(book);
 
     expect(reused, path);
     expect(

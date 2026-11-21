@@ -132,6 +132,33 @@ void main() {
     );
   });
 
+  test('the README describes only the supported platforms', () {
+    final readme = File('README.md').readAsStringSync();
+    expect(readme, isNot(contains('├── docs/')));
+    expect(readme, contains('untouched Flutter'));
+    expect(readme, contains('Only Android and Linux are supported'));
+  });
+
+  test('shared octet-stream files must start with the ZIP magic', () {
+    final source = File(
+      'android/app/src/main/kotlin/com/github/Soyadrul/Folio/MainActivity.kt',
+    ).readAsStringSync();
+    expect(source, contains('looksLikeZip(partial)'));
+    expect(source, contains("'P'.code.toByte()"));
+  });
+
+  test('the signing log names the path Gradle actually resolves', () {
+    final workflow = File(
+      '.github/workflows/build-release.yml',
+    ).readAsStringSync();
+    expect(
+      workflow,
+      contains(
+        'Store file path: app/release-keystore.jks (resolves from android/)',
+      ),
+    );
+  });
+
   test('the README describes the reading modes that actually exist', () {
     final readme = File('README.md').readAsStringSync();
     expect(readme, isNot(contains('4 display modes')));

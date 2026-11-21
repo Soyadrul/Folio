@@ -94,6 +94,9 @@ Folio/
 └── analysis_options.yaml
 ```
 
+> The `ios/`, `macos/`, `windows/` and `web/` directories are untouched Flutter
+> scaffolds. Only Android and Linux are supported and covered by CI.
+
 ---
 
 ## 🚀 Getting Started

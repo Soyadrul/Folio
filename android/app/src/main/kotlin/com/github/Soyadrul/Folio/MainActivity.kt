@@ -193,6 +193,12 @@ class MainActivity : FlutterActivity() {
             partial.delete()
             return null
         }
+        // A file manager can report any document as application/octet-stream.
+        // EPUB is a ZIP, so reject obvious non-books before they reach Dart.
+        if (!looksLikeZip(partial)) {
+            partial.delete()
+            return null
+        }
         // A provider may reuse the URI for changed content, so a stale target
         // can exist. Some filesystems refuse to rename onto it.
         target.delete()
@@ -201,6 +207,21 @@ class MainActivity : FlutterActivity() {
             return null
         }
         return target.absolutePath
+    }
+
+    /** EPUB is a ZIP container; every valid book starts with the `PK` magic. */
+    private fun looksLikeZip(file: File): Boolean {
+        return try {
+            file.inputStream().use { input ->
+                val header = ByteArray(4)
+                val read = input.read(header)
+                read >= 2 &&
+                    header[0] == 'P'.code.toByte() &&
+                    header[1] == 'K'.code.toByte()
+            }
+        } catch (_: Exception) {
+            false
+        }
     }
 
     /** Declared size of [uri], or null when the provider does not report one. */
