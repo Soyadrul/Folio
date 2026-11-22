@@ -427,93 +427,102 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
               : Brightness.light,
         ),
       ),
-      child: Scaffold(
-        key: _scaffoldKey,
-        backgroundColor: background,
-        drawer: document == null ? null : _buildToc(document, foreground),
-        body: document == null
-            ? _buildLoading(background, foreground)
-            : Stack(
-                children: [
-                  Positioned.fill(
-                    child: Padding(
-                      padding: EdgeInsets.symmetric(
-                        horizontal: settings.marginHorizontal,
-                      ),
-                      child: _buildContent(document, settings),
-                    ),
-                  ),
-                  if (_runtimeError != null)
-                    Positioned(
-                      left: 16,
-                      right: 16,
-                      bottom: 72,
-                      child: Material(
-                        color: Colors.black87,
-                        borderRadius: BorderRadius.circular(10),
-                        child: Padding(
-                          padding: const EdgeInsets.all(12),
-                          child: Text(
-                            _runtimeError!,
-                            style: const TextStyle(color: Colors.white),
-                          ),
+      child: PopScope(
+        // The reader keeps its own back history (footnotes, links, contents
+        // jumps). While it has somewhere to return to, the system Back gesture
+        // must consume that entry instead of closing the whole book.
+        canPop: !_canGoBack,
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop) unawaited(_content.goBack());
+        },
+        child: Scaffold(
+          key: _scaffoldKey,
+          backgroundColor: background,
+          drawer: document == null ? null : _buildToc(document, foreground),
+          body: document == null
+              ? _buildLoading(background, foreground)
+              : Stack(
+                  children: [
+                    Positioned.fill(
+                      child: Padding(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: settings.marginHorizontal,
                         ),
+                        child: _buildContent(document, settings),
                       ),
                     ),
-                  Positioned(
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    child: FadeTransition(
-                      opacity: _fadeAnimation,
-                      child: IgnorePointer(
-                        ignoring: !_uiVisible,
-                        child: _buildTopBar(settings, foreground, background),
-                      ),
-                    ),
-                  ),
-                  Positioned(
-                    bottom: 0,
-                    left: 0,
-                    right: 0,
-                    child: FadeTransition(
-                      opacity: _fadeAnimation,
-                      child: IgnorePointer(
-                        ignoring: !_uiVisible,
-                        child: _buildBottomBar(
-                          settings,
-                          foreground,
-                          background,
-                        ),
-                      ),
-                    ),
-                  ),
-                  if (_autoRunning && !_uiVisible)
-                    Positioned(
-                      top: 14,
-                      right: 14,
-                      child: IgnorePointer(
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 5,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.55),
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: Text(
-                            '▶ $_autoSpeed px/s',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 11,
+                    if (_runtimeError != null)
+                      Positioned(
+                        left: 16,
+                        right: 16,
+                        bottom: 72,
+                        child: Material(
+                          color: Colors.black87,
+                          borderRadius: BorderRadius.circular(10),
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Text(
+                              _runtimeError!,
+                              style: const TextStyle(color: Colors.white),
                             ),
                           ),
                         ),
                       ),
+                    Positioned(
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      child: FadeTransition(
+                        opacity: _fadeAnimation,
+                        child: IgnorePointer(
+                          ignoring: !_uiVisible,
+                          child: _buildTopBar(settings, foreground, background),
+                        ),
+                      ),
                     ),
-                ],
-              ),
+                    Positioned(
+                      bottom: 0,
+                      left: 0,
+                      right: 0,
+                      child: FadeTransition(
+                        opacity: _fadeAnimation,
+                        child: IgnorePointer(
+                          ignoring: !_uiVisible,
+                          child: _buildBottomBar(
+                            settings,
+                            foreground,
+                            background,
+                          ),
+                        ),
+                      ),
+                    ),
+                    if (_autoRunning && !_uiVisible)
+                      Positioned(
+                        top: 14,
+                        right: 14,
+                        child: IgnorePointer(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 5,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.55),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Text(
+                              '▶ $_autoSpeed px/s',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+        ),
       ),
     );
   }

@@ -522,6 +522,135 @@ void main() {
 
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('system back returns to the previous location before leaving', (
+    tester,
+  ) async {
+    final book = Book(path: epub.path, title: 'Old Book', author: 'Jane Doe');
+    final loader = EpubLoader(cacheRoot: Directory(p.join(tmp.path, 'cache')));
+    await _pushReader(tester, book: book, loader: loader);
+    expect(find.byType(ReaderScreen), findsOneWidget);
+    expect(find.text('One'), findsOneWidget);
+
+    // A contents jump records the old location, which is what the undo icon
+    // and the system Back gesture should both use.
+    await tester.tap(find.byIcon(Icons.format_list_bulleted_rounded));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.text('Two'));
+    await tester.pump();
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+    });
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byIcon(Icons.undo_rounded), findsOneWidget);
+
+    await tester.binding.handlePopRoute();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(
+      find.byType(ReaderScreen),
+      findsOneWidget,
+      reason: 'Back must not close the book while in-book history exists',
+    );
+    expect(
+      find.byIcon(Icons.undo_rounded),
+      findsNothing,
+      reason: 'Back must consume the recorded history entry',
+    );
+  });
+
+  testWidgets('system back closes the table of contents before the book', (
+    tester,
+  ) async {
+    final book = Book(path: epub.path, title: 'Old Book', author: 'Jane Doe');
+    final loader = EpubLoader(cacheRoot: Directory(p.join(tmp.path, 'cache')));
+    await _pushReader(tester, book: book, loader: loader);
+
+    await tester.tap(find.byIcon(Icons.format_list_bulleted_rounded));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('Contents'), findsOneWidget);
+
+    await tester.binding.handlePopRoute();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.text('Contents'), findsNothing);
+    expect(find.byType(ReaderScreen), findsOneWidget);
+  });
+
+  testWidgets('system back leaves the book when there is no history', (
+    tester,
+  ) async {
+    final book = Book(path: epub.path, title: 'Old Book', author: 'Jane Doe');
+    final loader = EpubLoader(cacheRoot: Directory(p.join(tmp.path, 'cache')));
+    await _pushReader(tester, book: book, loader: loader);
+    expect(find.byIcon(Icons.undo_rounded), findsNothing);
+
+    await tester.binding.handlePopRoute();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(find.byType(ReaderScreen), findsNothing);
+    expect(find.text('books: 0'), findsOneWidget);
+  });
+}
+
+/// Pushes a reader on top of a stand-in home screen, so a Back gesture has a
+/// route to leave, and waits for the book to load.
+///
+/// The document is parsed with real file IO first and then handed to the
+/// reader through a loader that returns an already-completed future: the route
+/// is pushed in the fake-async zone, where pending file IO would never finish.
+Future<void> _pushReader(
+  WidgetTester tester, {
+  required Book book,
+  required EpubLoader loader,
+}) async {
+  late EpubDocument document;
+  await tester.runAsync(() async {
+    document = await loader.load(book.path);
+  });
+
+  await tester.pumpWidget(
+    ProviderScope(
+      child: MaterialApp(theme: buildLightTheme(), home: const _LibraryHome()),
+    ),
+  );
+  final navigator = tester.state<NavigatorState>(find.byType(Navigator));
+  unawaited(
+    navigator.push(
+      MaterialPageRoute<void>(
+        builder: (_) => ReaderScreen(book: book, loader: _LoadedLoader(document)),
+      ),
+    ),
+  );
+  await tester.pump();
+  // Two real-time rounds: the first lets the EPUB load and mount the content
+  // view, the second lets that view read the first chapter from disk. The
+  // continuations land in the fake-async zone, so a pump follows each round.
+  for (var i = 0; i < 2; i++) {
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 800));
+    });
+    await tester.pump();
+  }
+  await tester.pump(const Duration(milliseconds: 400));
+}
+
+/// Serves an [EpubDocument] that was parsed before the widget test started.
+class _LoadedLoader extends EpubLoader {
+  _LoadedLoader(this.document);
+
+  final EpubDocument document;
+
+  @override
+  Future<EpubDocument> load(String filePath) async => document;
 }
 
 /// Answers every HTTP request with a future that never completes, so font
