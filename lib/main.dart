@@ -30,11 +30,15 @@ import 'models/book.dart';
 import 'providers/settings_provider.dart';
 import 'screens/home_screen.dart';
 import 'screens/reader_screen.dart';
+import 'utils/error_reporting.dart';
 import 'utils/open_file_service.dart';
 import 'utils/theme_utils.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Release builds have no console, so install handlers that write to the
+  // platform log before anything else can fail.
+  installErrorReporting();
 
   // The app is offline-first: every font it uses ships in assets. A missing
   // asset is a build error the tests catch, not a reason to call Google.
