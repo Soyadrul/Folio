@@ -104,6 +104,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       body: CustomScrollView(
         slivers: [
           _buildAppBar(library),
+          // A refresh keeps the current grid; a thin bar shows that work is
+          // still running instead of blanking the library.
+          if (library.isLoading && library.books.isNotEmpty)
+            const SliverToBoxAdapter(
+              child: LinearProgressIndicator(minHeight: 2),
+            ),
           if (library.folderPath != null) _buildSearchBar(),
           if (library.warningMessage != null) _buildWarning(library),
           _buildBody(library, filteredBooks),
@@ -254,8 +260,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   Widget _buildBody(LibraryState library, List<Book> books) {
-    // ① Loading
-    if (library.isLoading) {
+    // ① Loading with nothing to show yet. Once books are listed, the thin
+    // progress bar under the app bar covers refreshes.
+    if (library.isLoading && library.books.isEmpty) {
       return const SliverFillRemaining(
         child: Center(child: CircularProgressIndicator()),
       );
