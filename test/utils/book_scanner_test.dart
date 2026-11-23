@@ -40,6 +40,25 @@ void main() {
     expect(books.every((b) => b.lastModifiedMs > 0), isTrue);
   });
 
+  test('sorts accented titles next to their unaccented letters', () async {
+    Future<void> writeTitle(String name, String title) => writeBook(
+      '$name.epub',
+      epub2Entries(
+        opf: epub2Opf.replaceFirst(
+          '<dc:title>Old Book</dc:title>',
+          '<dc:title>$title</dc:title>',
+        ),
+      ),
+    );
+    await writeTitle('z', 'Zeta');
+    await writeTitle('e', 'Èdipo');
+    await writeTitle('a', 'Alfa');
+
+    final books = (await scanFolderForBooks(tmp.path)).books;
+
+    expect(books.map((b) => b.title), ['Alfa', 'Èdipo', 'Zeta']);
+  });
+
   test('keeps books with broken metadata using filename fallbacks', () async {
     await writeBook('good.epub', epub2Entries());
     final broken = File(p.join(tmp.path, 'broken.epub'));

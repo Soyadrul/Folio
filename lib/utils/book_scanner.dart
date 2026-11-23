@@ -8,6 +8,7 @@ import 'package:path/path.dart' as p;
 import '../epub/epub_metadata.dart';
 import '../library/metadata_cache.dart';
 import '../models/book.dart';
+import 'library_text.dart';
 
 /// Outcome of a library scan.
 ///
@@ -119,7 +120,9 @@ Future<LibraryScan> scanFolderForBooks(
     );
   }).toList();
 
-  books.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+  books.sort(
+    (a, b) => foldDiacritics(a.title).compareTo(foldDiacritics(b.title)),
+  );
   return LibraryScan(
     books: books,
     unreadablePaths: collected.unreadablePaths,

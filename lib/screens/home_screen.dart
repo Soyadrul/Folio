@@ -7,6 +7,7 @@ import 'package:permission_handler/permission_handler.dart';
 import '../models/book.dart';
 import '../providers/library_provider.dart';
 import '../utils/android_storage.dart';
+import '../utils/library_text.dart';
 import '../utils/theme_utils.dart';
 import '../widgets/book_card.dart';
 import 'reader_screen.dart';
@@ -95,11 +96,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
     final filteredBooks = _searchQuery.isEmpty
         ? library.books
-        : library.books.where((b) {
-            final q = _searchQuery.toLowerCase();
-            return b.title.toLowerCase().contains(q) ||
-                b.author.toLowerCase().contains(q);
-          }).toList();
+        : library.books
+              .where((b) => bookMatchesQuery(b, _searchQuery))
+              .toList();
 
     return Scaffold(
       body: CustomScrollView(
