@@ -76,7 +76,7 @@ class FolioApp extends StatefulWidget {
   State<FolioApp> createState() => _FolioAppState();
 }
 
-class _FolioAppState extends State<FolioApp> {
+class _FolioAppState extends State<FolioApp> with WidgetsBindingObserver {
   final _navigatorKey = GlobalKey<NavigatorState>();
   final _openFiles = OpenFileService();
   final _pendingOpenFiles = <String>[];
@@ -86,6 +86,7 @@ class _FolioAppState extends State<FolioApp> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _openSubscription = _openFiles.files.listen(_handleOpenFile);
     // Start the channel after the first frame so a pending file has a
     // navigator to open into.
@@ -111,9 +112,32 @@ class _FolioAppState extends State<FolioApp> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _openSubscription?.cancel();
     _openFiles.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Settings changed from the home screen are saved on a 250 ms debounce.
+    // Android pauses the activity before the process can be killed, so write
+    // any pending change now instead of losing it.
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.detached) {
+      unawaited(_flushSettings());
+    }
+  }
+
+  Future<void> _flushSettings() async {
+    if (!mounted) return;
+    try {
+      final container = ProviderScope.containerOf(context, listen: false);
+      await container.read(settingsNotifierProvider.notifier).flush();
+    } catch (error) {
+      debugPrint('Folio: could not flush settings: $error');
+    }
   }
 
   Future<void> _pruneCaches() async {
