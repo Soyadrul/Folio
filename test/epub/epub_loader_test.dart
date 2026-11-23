@@ -479,6 +479,33 @@ void main() {
   });
 
   test(
+    'clearCache keeps the open book even with an unnormalized path',
+    () async {
+      final first = await EpubFixture.write(
+        tmp,
+        epub2Entries(),
+        name: 'a.epub',
+      );
+      final second = await EpubFixture.write(
+        tmp,
+        epub3Entries(),
+        name: 'b.epub',
+      );
+      final loaderUnderTest = loader();
+      final firstBook = await loaderUnderTest.load(first.path);
+      final secondBook = await loaderUnderTest.load(second.path);
+      // The marker stores a normalized absolute path, so a `..` segment in the
+      // caller's path must not defeat the comparison.
+      final keep = p.join(tmp.path, 'unused', '..', p.basename(first.path));
+
+      await loaderUnderTest.clearCache(keepBookPaths: {keep});
+
+      expect(Directory(firstBook.cacheDir).existsSync(), isTrue);
+      expect(Directory(secondBook.cacheDir).existsSync(), isFalse);
+    },
+  );
+
+  test(
     'opening a new book extracts and parses through the isolate runner',
     () async {
       final runs = <String>[];

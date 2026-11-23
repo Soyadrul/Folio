@@ -460,14 +460,20 @@ class EpubLoader {
   Future<void> clearCache({Set<String> keepBookPaths = const {}}) async {
     final root = await _root();
     if (!await root.exists()) return;
-    if (keepBookPaths.isEmpty) {
+    // The cache marker records a normalized absolute path; the caller may pass
+    // the path exactly as it was opened, which can contain `..` or a relative
+    // prefix. Normalize both sides before comparing.
+    final keep = keepBookPaths
+        .map((path) => p.normalize(p.absolute(path)))
+        .toSet();
+    if (keep.isEmpty) {
       await root.delete(recursive: true);
       return;
     }
     try {
       await for (final entity in root.list(followLinks: false)) {
         if (entity is! Directory) continue;
-        if (keepBookPaths.contains(await _cachedSourcePath(entity))) continue;
+        if (keep.contains(await _cachedSourcePath(entity))) continue;
         try {
           await entity.delete(recursive: true);
         } on FileSystemException {
