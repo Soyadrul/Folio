@@ -54,4 +54,35 @@ void main() {
     expect(ReaderSystemUi.debugReaders, 0);
     expect(modes, isEmpty);
   });
+
+  test('reapply is a no-op while no reader is open', () {
+    ReaderSystemUi.reapply();
+    expect(modes, isEmpty);
+  });
+
+  test('reapply re-issues immersive mode for an open reader', () {
+    ReaderSystemUi.enter();
+    expect(modes, hasLength(1));
+
+    // A resumed app, a closed Settings screen or an IME change can make the
+    // system bars visible again; the reader must put them back.
+    ReaderSystemUi.reapply();
+    expect(modes, [
+      'SystemUiMode.immersiveSticky',
+      'SystemUiMode.immersiveSticky',
+    ]);
+
+    ReaderSystemUi.enter();
+    ReaderSystemUi.reapply();
+    expect(modes, hasLength(3), reason: 'still one immersive owner');
+  });
+
+  test('reapply after the last reader left keeps the bars restored', () {
+    ReaderSystemUi.enter();
+    ReaderSystemUi.leave();
+    modes.clear();
+
+    ReaderSystemUi.reapply();
+    expect(modes, isEmpty);
+  });
 }

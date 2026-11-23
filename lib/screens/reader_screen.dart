@@ -146,9 +146,18 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
       // saving the position.
       unawaited(_settingsNotifier.flush());
       _persistPosition(force: true);
-    } else if (_uiVisible) {
-      _fade.forward();
+    } else {
+      // The bars can come back while the app is in the background.
+      ReaderSystemUi.reapply();
+      if (_uiVisible) _fade.forward();
     }
+  }
+
+  @override
+  void didChangeMetrics() {
+    // Showing or hiding the keyboard (and some system panels) makes Android
+    // reveal the bars for a moment.
+    ReaderSystemUi.reapply();
   }
 
   // ── Hardware volume keys ──────────────────────────────────────────────────
@@ -254,7 +263,11 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
       ),
     );
     _settingsOpen = false;
-    if (mounted) _syncVolumeKeys(ref.read(settingsNotifierProvider));
+    if (mounted) {
+      // Pushing a route over the reader lets the system bars back in.
+      ReaderSystemUi.reapply();
+      _syncVolumeKeys(ref.read(settingsNotifierProvider));
+    }
   }
 
   void _onProgress(ReaderProgressEvent event) {

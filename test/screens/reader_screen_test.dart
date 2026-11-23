@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:folio/epub/epub.dart';
@@ -523,6 +524,37 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('resuming the app re-applies immersive mode', (tester) async {
+    final modes = <String>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, (call) async {
+          if (call.method == 'SystemChrome.setEnabledSystemUIMode') {
+            modes.add(call.arguments as String);
+          }
+          return null;
+        });
+    addTearDown(
+      () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform, null),
+    );
+
+    final book = Book(path: epub.path, title: 'Old Book', author: 'Jane Doe');
+    final loader = EpubLoader(cacheRoot: Directory(p.join(tmp.path, 'cache')));
+    await _pushReader(tester, book: book, loader: loader);
+    expect(modes, contains('SystemUiMode.immersiveSticky'));
+
+    // Leaving and re-entering the app can leave the system bars visible.
+    modes.clear();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+
+    expect(modes, contains('SystemUiMode.immersiveSticky'));
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+
   testWidgets('system back returns to the previous location before leaving', (
     tester,
   ) async {
@@ -626,7 +658,8 @@ Future<void> _pushReader(
   unawaited(
     navigator.push(
       MaterialPageRoute<void>(
-        builder: (_) => ReaderScreen(book: book, loader: _LoadedLoader(document)),
+        builder: (_) =>
+            ReaderScreen(book: book, loader: _LoadedLoader(document)),
       ),
     ),
   );

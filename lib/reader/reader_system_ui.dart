@@ -13,6 +13,20 @@ class ReaderSystemUi {
 
   static void enter() {
     if (_readers++ > 0) return;
+    _applyImmersive();
+  }
+
+  /// Puts the bars back after something outside the reader made them visible:
+  /// a resumed app, a screen pushed over the reader, or an IME change.
+  ///
+  /// Android's "sticky" immersive mode normally re-hides them by itself, but
+  /// not on every vendor/OS combination, and the flash is visible either way.
+  static void reapply() {
+    if (_readers == 0) return;
+    _applyImmersive();
+  }
+
+  static void _applyImmersive() {
     unawaited(
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky),
     );
