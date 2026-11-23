@@ -189,6 +189,36 @@ void main() {
     expect(prefs.getString('folio_library_folder'), secondDir.path);
   });
 
+  test(
+    'a scan finishing after the notifier is disposed does not throw',
+    () async {
+      final release = Completer<void>();
+      final container = ProviderContainer(
+        overrides: [
+          libraryProvider.overrideWith(
+            () => LibraryNotifier(
+              scanner: (path, {cachePath}) async {
+                await release.future;
+                return const LibraryScan(
+                  books: [Book(path: 'a', title: 'A', author: 'B')],
+                );
+              },
+            ),
+          ),
+        ],
+      );
+      final notifier = container.read(libraryProvider.notifier);
+      final run = notifier.scanFolder(tmp.path);
+      await Future<void>.delayed(Duration.zero);
+
+      // The home screen can be replaced (tests, hot restart) while a scan runs.
+      container.dispose();
+      release.complete();
+
+      await run;
+    },
+  );
+
   test('warns when the metadata scan failed', () async {
     final container = containerWith(
       (path, {cachePath}) async => const LibraryScan(

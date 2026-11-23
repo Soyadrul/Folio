@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -94,14 +95,25 @@ class LibraryNotifier extends Notifier<LibraryState> {
   int _scanToken = 0;
   String? _cachePath;
   bool _cachePathResolved = false;
+  bool _disposed = false;
 
   @override
   LibraryState build() {
+    _disposed = false;
+    ref.onDispose(() => _disposed = true);
     // Load saved folder on initialization
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _loadSavedFolder();
+      if (_disposed) return;
+      unawaited(_loadSavedFolder());
     });
     return const LibraryState();
+  }
+
+  /// Publishes a new state, unless the provider was disposed while an async
+  /// scan was still running (tests, hot restart, app teardown).
+  void _update(LibraryState Function(LibraryState current) updater) {
+    if (_disposed) return;
+    state = updater(state);
   }
 
   Future<String?> _metadataCachePath() async {
@@ -125,12 +137,20 @@ class LibraryNotifier extends Notifier<LibraryState> {
 
   /// Restores the previously selected folder and re-scans it on startup.
   Future<void> _loadSavedFolder() async {
-    final prefs = await SharedPreferences.getInstance();
-    final saved = prefs.getString(_kLibraryFolderKey);
-    if (saved == null) return;
+    final String? saved;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      saved = prefs.getString(_kLibraryFolderKey);
+    } catch (error) {
+      // A broken preferences store must not become an unhandled async error;
+      // the welcome screen still lets the user pick a folder.
+      debugPrint('Folio: could not restore the library folder: $error');
+      return;
+    }
+    if (saved == null || _disposed) return;
     // A folder picked by the user while this was loading wins.
     if (state.folderPath != null) return;
-    state = state.copyWith(folderPath: saved);
+    _update((current) => current.copyWith(folderPath: saved));
     await scanFolder(saved, persist: false);
   }
 
@@ -141,29 +161,35 @@ class LibraryNotifier extends Notifier<LibraryState> {
   /// a superseded scan never publishes its result.
   Future<void> scanFolder(String path, {bool persist = true}) async {
     final token = ++_scanToken;
-    state = state.copyWith(
-      folderPath: path,
-      isLoading: true,
-      clearError: true,
-      clearWarning: true,
-      needsPermission: false,
+    _update(
+      (current) => current.copyWith(
+        folderPath: path,
+        isLoading: true,
+        clearError: true,
+        clearWarning: true,
+        needsPermission: false,
+      ),
     );
 
     if (!await _hasStoragePermission()) {
       if (token != _scanToken) return;
-      state = state.copyWith(
-        isLoading: false,
-        needsPermission: true,
-        errorMessage: 'Storage permission is required to read your books.',
+      _update(
+        (current) => current.copyWith(
+          isLoading: false,
+          needsPermission: true,
+          errorMessage: 'Storage permission is required to read your books.',
+        ),
       );
       return;
     }
 
     if (!await Directory(path).exists()) {
       if (token != _scanToken) return;
-      state = state.copyWith(
-        isLoading: false,
-        errorMessage: 'Folder not found: $path',
+      _update(
+        (current) => current.copyWith(
+          isLoading: false,
+          errorMessage: 'Folder not found: $path',
+        ),
       );
       return;
     }
@@ -192,22 +218,26 @@ class LibraryNotifier extends Notifier<LibraryState> {
               ? 'No EPUB files were found. On Android 11 and newer, grant '
                     '"All files access" or choose a folder under Documents.'
               : null);
-      state = state.copyWith(
-        books: books,
-        isLoading: false,
-        needsPermission: permissionProblem,
-        errorMessage: permissionProblem && books.isEmpty
-            ? 'Storage permission is required to read your books.'
-            : null,
-        warningMessage: warning,
-        clearError: !(permissionProblem && books.isEmpty),
-        clearWarning: false,
+      _update(
+        (current) => current.copyWith(
+          books: books,
+          isLoading: false,
+          needsPermission: permissionProblem,
+          errorMessage: permissionProblem && books.isEmpty
+              ? 'Storage permission is required to read your books.'
+              : null,
+          warningMessage: warning,
+          clearError: !(permissionProblem && books.isEmpty),
+          clearWarning: false,
+        ),
       );
     } catch (e) {
       if (token != _scanToken) return;
-      state = state.copyWith(
-        isLoading: false,
-        errorMessage: 'Could not scan folder: $e',
+      _update(
+        (current) => current.copyWith(
+          isLoading: false,
+          errorMessage: 'Could not scan folder: $e',
+        ),
       );
     }
   }
@@ -270,16 +300,18 @@ class LibraryNotifier extends Notifier<LibraryState> {
     double progress, {
     double? overallProgress,
   }) {
-    final updated = state.books.map((b) {
-      if (b.path == bookPath) {
-        return b.copyWith(
-          lastChapterIndex: chapterIndex,
-          lastProgress: progress,
-          overallProgress: overallProgress,
-        );
-      }
-      return b;
-    }).toList();
-    state = state.copyWith(books: updated);
+    _update((current) {
+      final updated = current.books.map((b) {
+        if (b.path == bookPath) {
+          return b.copyWith(
+            lastChapterIndex: chapterIndex,
+            lastProgress: progress,
+            overallProgress: overallProgress,
+          );
+        }
+        return b;
+      }).toList();
+      return current.copyWith(books: updated);
+    });
   }
 }
