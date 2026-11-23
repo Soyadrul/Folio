@@ -179,6 +179,24 @@ void main() {
         .where((candidate) => candidate.path.endsWith('.none'));
     expect(markers, hasLength(1));
   });
+  test('a temporary storage failure is retried on the next request', () async {
+    final book = bookFor(await writeWithCover(coverBytes()));
+    // A file where the cache directory should be makes creating the
+    // destination fail, which is the "storage is temporarily unavailable"
+    // path: it must not be remembered for the whole session.
+    await coverCache.parent.create(recursive: true);
+    await File(coverCache.path).writeAsString('not a directory');
+
+    final covers = service();
+    expect(await covers.thumbnailFor(book), isNull);
+
+    await File(coverCache.path).delete();
+    final path = await covers.thumbnailFor(book);
+
+    expect(path, isNotNull);
+    expect(File(path!).existsSync(), isTrue);
+  });
+
   test('reusing a thumbnail refreshes its last-used time', () async {
     final book = bookFor(await writeWithCover(coverBytes()));
     final covers = service();

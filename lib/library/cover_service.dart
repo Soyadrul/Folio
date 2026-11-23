@@ -85,7 +85,12 @@ class CoverService {
     _inFlight[book.path] = future;
     try {
       final result = await future;
-      _memo[book.path] = _CachedCover(signature, result);
+      // Only a real thumbnail is safe to remember. A null can mean "this book
+      // has no cover" (the `.none` marker covers that case on disk) or a
+      // temporary storage/isolate failure that must be retried next time.
+      if (result != null) {
+        _memo[book.path] = _CachedCover(signature, result);
+      }
       return result;
     } finally {
       _inFlight.remove(book.path);
