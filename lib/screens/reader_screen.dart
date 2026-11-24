@@ -199,7 +199,7 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
       ..hideCurrentSnackBar()
       ..showSnackBar(
         SnackBar(
-          content: Text('Scroll speed ${nextSpeed.round()} px/s'),
+          content: Text('Scroll speed ${nextSpeed.round()} dp/s'),
           duration: const Duration(milliseconds: 700),
         ),
       );
@@ -524,7 +524,7 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
                               borderRadius: BorderRadius.circular(20),
                             ),
                             child: Text(
-                              '▶ $_autoSpeed px/s',
+                              '▶ $_autoSpeed dp/s',
                               style: const TextStyle(
                                 color: Colors.white,
                                 fontSize: 11,
@@ -793,7 +793,7 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
     Color foreground,
     Color background,
   ) {
-    final percent = (_overallProgress * 100).toStringAsFixed(0);
+    final percent = (_overallProgress * 100).round();
     final position = _document?.readingOrderPosition(_chapterIndex);
     final chapterLabel = position != null && _totalChapters > 0
         ? 'Ch. $position / $_totalChapters'
@@ -850,7 +850,7 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          '$chapterLabel   ·   $percent%',
+                          progressLabel(chapterLabel, percent),
                           style: GoogleFonts.lato(
                             fontSize: 10,
                             color: foreground.withValues(alpha: 0.5),
@@ -979,4 +979,16 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
       ),
     );
   }
+}
+
+/// The progress line under the page counter.
+///
+/// Auxiliary pages (notes, endnotes) have no reading-order position, so the
+/// separator must not be shown on its own.
+@visibleForTesting
+String progressLabel(String chapterLabel, int percent) {
+  return [
+    if (chapterLabel.isNotEmpty) chapterLabel,
+    '$percent%',
+  ].join('   ·   ');
 }

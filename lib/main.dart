@@ -70,7 +70,10 @@ void main() async {
 
 /// Root [MaterialApp] for the Folio ebook reader.
 class FolioApp extends StatefulWidget {
-  const FolioApp({super.key});
+  const FolioApp({super.key, this.openFiles});
+
+  /// Injectable for tests; production uses the Android intent channel.
+  final OpenFileService? openFiles;
 
   @override
   State<FolioApp> createState() => _FolioAppState();
@@ -78,7 +81,8 @@ class FolioApp extends StatefulWidget {
 
 class _FolioAppState extends State<FolioApp> with WidgetsBindingObserver {
   final _navigatorKey = GlobalKey<NavigatorState>();
-  final _openFiles = OpenFileService();
+  final _messengerKey = GlobalKey<ScaffoldMessengerState>();
+  late final OpenFileService _openFiles;
   final _pendingOpenFiles = <String>[];
   StreamSubscription<String>? _openSubscription;
   bool _ready = false;
@@ -87,6 +91,7 @@ class _FolioAppState extends State<FolioApp> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _openFiles = widget.openFiles ?? OpenFileService();
     _openSubscription = _openFiles.files.listen(_handleOpenFile);
     // Start the channel after the first frame so a pending file has a
     // navigator to open into.
@@ -156,7 +161,16 @@ class _FolioAppState extends State<FolioApp> with WidgetsBindingObserver {
       _pendingOpenFiles.add(path);
       return;
     }
-    if (!File(path).existsSync()) return;
+    if (!File(path).existsSync()) {
+      _messengerKey.currentState?.showSnackBar(
+        SnackBar(
+          content: Text(
+            'This file is no longer available: ${p.basename(path)}',
+          ),
+        ),
+      );
+      return;
+    }
 
     String title;
     String author;
@@ -178,6 +192,7 @@ class _FolioAppState extends State<FolioApp> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     return MaterialApp(
       navigatorKey: _navigatorKey,
+      scaffoldMessengerKey: _messengerKey,
       title: 'Folio',
       debugShowCheckedModeBanner: false,
       theme: buildLightTheme(),

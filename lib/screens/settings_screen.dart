@@ -91,7 +91,7 @@ class SettingsScreen extends ConsumerWidget {
                 max: AppSettings.maxFontSize,
                 divisions: (AppSettings.maxFontSize - AppSettings.minFontSize)
                     .round(),
-                displayValue: '${settings.fontSize.round()} px',
+                displayValue: '${settings.fontSize.round()} dp',
                 onChanged: (v) =>
                     notifier.update((s) => s.copyWith(fontSize: v)),
               ),
@@ -117,7 +117,7 @@ class SettingsScreen extends ConsumerWidget {
                 max: AppSettings.maxMargin,
                 divisions: (AppSettings.maxMargin - AppSettings.minMargin)
                     .round(),
-                displayValue: '${settings.marginHorizontal.round()} px',
+                displayValue: '${settings.marginHorizontal.round()} dp',
                 onChanged: (v) =>
                     notifier.update((s) => s.copyWith(marginHorizontal: v)),
               ),
@@ -231,7 +231,7 @@ class SettingsScreen extends ConsumerWidget {
                     ((AppSettings.maxScrollSpeed - AppSettings.minScrollSpeed) /
                             5)
                         .round(),
-                displayValue: '${settings.autoScrollSpeed.round()} px/s',
+                displayValue: '${settings.autoScrollSpeed.round()} dp/s',
                 onChanged: (v) =>
                     notifier.update((s) => s.copyWith(autoScrollSpeed: v)),
               ),

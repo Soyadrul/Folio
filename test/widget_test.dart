@@ -1,11 +1,13 @@
 // This is a basic Flutter widget test.
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:folio/main.dart';
 import 'package:folio/models/app_settings.dart';
 import 'package:folio/providers/settings_provider.dart';
+import 'package:folio/utils/open_file_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
@@ -15,6 +17,36 @@ void main() {
 
     // Verify that the app displays the title.
     expect(find.text('Folio'), findsOneWidget);
+  });
+
+  testWidgets('a missing opened file is reported instead of ignored', (
+    tester,
+  ) async {
+    const channel = MethodChannel('folio/intents_test');
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          if (call.method == 'ready') {
+            return <String>['/definitely/missing/book.epub'];
+          }
+          return null;
+        });
+    addTearDown(
+      () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null),
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        child: FolioApp(openFiles: OpenFileService(channel: channel)),
+      ),
+    );
+    await tester.pump();
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    });
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('no longer available'), findsOneWidget);
   });
 
   testWidgets('backgrounding the app flushes a setting changed on Home', (

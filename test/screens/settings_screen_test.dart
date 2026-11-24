@@ -33,6 +33,22 @@ void main() {
     HttpOverrides.global = previousHttpOverrides;
   });
 
+  testWidgets('slider values are labelled in logical pixels', (tester) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        child: MaterialApp(
+          theme: buildLightTheme(),
+          home: const SettingsScreen(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('18 dp'), findsOneWidget);
+    expect(find.text('16 dp'), findsOneWidget);
+    expect(find.textContaining(' px'), findsNothing);
+  });
+
   testWidgets('shows every section from the specification', (tester) async {
     await tester.pumpWidget(
       ProviderScope(
@@ -148,7 +164,11 @@ void main() {
     final bookDir = Directory(p.join(epubRoot.path, 'epub_old'))
       ..createSync(recursive: true);
     File(p.join(bookDir.path, '.folio-cache.json')).writeAsStringSync(
-      jsonEncode({'path': p.join(tmp.path, 'gone.epub'), 'size': 1, 'mtime': 1}),
+      jsonEncode({
+        'path': p.join(tmp.path, 'gone.epub'),
+        'size': 1,
+        'mtime': 1,
+      }),
     );
     File(p.join(coversRoot.path, 'thumb.jpg')).writeAsBytesSync([1]);
 

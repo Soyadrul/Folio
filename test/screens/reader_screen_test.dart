@@ -555,6 +555,11 @@ void main() {
     await tester.pump();
   });
 
+  test('the bottom bar omits an empty chapter label', () {
+    expect(progressLabel('', 37), '37%');
+    expect(progressLabel('Ch. 1 / 2', 37), 'Ch. 1 / 2   ·   37%');
+  });
+
   testWidgets('system back returns to the previous location before leaving', (
     tester,
   ) async {

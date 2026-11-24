@@ -63,82 +63,91 @@ class _BookCardState extends ConsumerState<BookCard> {
     final scheme = Theme.of(context).colorScheme;
     final hasProgress = book.overallProgress > 0.01;
 
-    return GestureDetector(
+    return Semantics(
+      button: true,
+      label: '${book.title} by ${book.author}',
       onTap: widget.onTap,
-      child: Container(
-        decoration: BoxDecoration(
-          color: Theme.of(context).cardTheme.color,
-          borderRadius: BorderRadius.circular(10),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.10),
-              blurRadius: 8,
-              offset: const Offset(0, 3),
-            ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // ── Cover image ──────────────────────────────────────────────
-            Expanded(
-              child: ClipRRect(
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(10),
+      excludeSemantics: true,
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: Container(
+          decoration: BoxDecoration(
+            color: Theme.of(context).cardTheme.color,
+            borderRadius: BorderRadius.circular(10),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.10),
+                blurRadius: 8,
+                offset: const Offset(0, 3),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // ── Cover image ──────────────────────────────────────────────
+              Expanded(
+                child: ClipRRect(
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(10),
+                  ),
+                  child: _thumbnail != null
+                      ? Image.file(
+                          File(_thumbnail!),
+                          fit: BoxFit.cover,
+                          cacheWidth: 400,
+                          filterQuality: FilterQuality.medium,
+                          gaplessPlayback: true,
+                          errorBuilder: (_, _, _) => _buildPlaceholder(context),
+                        )
+                      : _buildPlaceholder(context),
                 ),
-                child: _thumbnail != null
-                    ? Image.file(
-                        File(_thumbnail!),
-                        fit: BoxFit.cover,
-                        cacheWidth: 400,
-                        filterQuality: FilterQuality.medium,
-                        gaplessPlayback: true,
-                        errorBuilder: (_, _, _) => _buildPlaceholder(context),
-                      )
-                    : _buildPlaceholder(context),
-              ),
-            ),
-
-            // ── Progress bar (thin strip) ────────────────────────────────
-            if (hasProgress)
-              LinearProgressIndicator(
-                value: book.overallProgress,
-                minHeight: 3,
-                backgroundColor: scheme.onSurface.withValues(alpha: 0.08),
-                valueColor: const AlwaysStoppedAnimation<Color>(kAccentColor),
               ),
 
-            // ── Metadata ─────────────────────────────────────────────────
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    book.title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: GoogleFonts.lato(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: Theme.of(context).textTheme.titleMedium?.color,
-                      height: 1.2,
+              // ── Progress bar (thin strip) ────────────────────────────────
+              if (hasProgress)
+                LinearProgressIndicator(
+                  value: book.overallProgress,
+                  minHeight: 3,
+                  backgroundColor: scheme.onSurface.withValues(alpha: 0.08),
+                  valueColor: const AlwaysStoppedAnimation<Color>(kAccentColor),
+                ),
+
+              // ── Metadata ─────────────────────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 8,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      book.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.lato(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: Theme.of(context).textTheme.titleMedium?.color,
+                        height: 1.2,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    book.author,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: GoogleFonts.lato(
-                      fontSize: 11,
-                      color: Theme.of(context).textTheme.bodyMedium?.color,
+                    const SizedBox(height: 3),
+                    Text(
+                      book.author,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.lato(
+                        fontSize: 11,
+                        color: Theme.of(context).textTheme.bodyMedium?.color,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

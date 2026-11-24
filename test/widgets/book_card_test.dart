@@ -78,6 +78,31 @@ void main() {
     );
     expect(bar.value, 0.6);
   });
+
+  testWidgets('screen readers announce the card as a tappable book', (
+    tester,
+  ) async {
+    final handle = tester.ensureSemantics();
+    final service = _PendingCoverService();
+    const book = Book(
+      path: '/books/a11y.epub',
+      title: 'Accessible',
+      author: 'Author',
+    );
+
+    await tester.pumpWidget(_app(book, service));
+    await tester.pump();
+
+    expect(
+      tester.getSemantics(find.byType(BookCard)),
+      isSemantics(
+        label: 'Accessible by Author',
+        isButton: true,
+        hasTapAction: true,
+      ),
+    );
+    handle.dispose();
+  });
 }
 
 Widget _app(Book book, CoverService service) {
