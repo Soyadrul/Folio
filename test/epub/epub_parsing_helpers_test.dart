@@ -117,6 +117,21 @@ void main() {
         'Chapter & One',
       );
     });
+
+    test('accepts h3 and h4 headings', () {
+      expect(
+        chapterTitleFromHtml('<body><h3>Chapter Three</h3></body>'),
+        'Chapter Three',
+      );
+      expect(
+        chapterTitleFromHtml('<body><h4>Chapter Four</h4></body>'),
+        'Chapter Four',
+      );
+    });
+
+    test('ignores headings below h4', () {
+      expect(chapterTitleFromHtml('<body><h5>Too deep</h5></body>'), '');
+    });
   });
 
   group('isEpubImagePath', () {

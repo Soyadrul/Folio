@@ -46,11 +46,12 @@ bool isEpubImagePath(String path) => EpubLoader.isEpubImagePath(path);
 /// Chooses a chapter title from its markup.
 ///
 /// `<title>` usually repeats the book title, so the first heading wins.
+/// Some books use `<h3>`/`<h4>` for chapter headings, so h1–h4 all count.
 /// The regex requires whitespace or `>` after `title`, which stops
 /// `<titlepage>` from matching.
 String chapterTitleFromHtml(String html, {String? bookTitle}) {
   final heading = RegExp(
-    r'<h[12](?:\s[^>]*)?>(.*?)</h[12]>',
+    r'<h[1-4](?:\s[^>]*)?>(.*?)</h[1-4]>',
     caseSensitive: false,
     dotAll: true,
   ).firstMatch(html)?.group(1);
@@ -1034,8 +1035,11 @@ class EpubLoader {
     try {
       final file = File(path);
       final length = await file.length();
+      // Some books have a long front-matter block before the first heading, so
+      // read more than the first 8 KiB (still a bounded read).
+      const window = 32 * 1024;
       final bytes = await file
-          .openRead(0, length > 8192 ? 8192 : length)
+          .openRead(0, length > window ? window : length)
           .fold<List<int>>(<int>[], (all, chunk) => all..addAll(chunk));
       final title = chapterTitleFromHtml(
         decodeEpubText(bytes),

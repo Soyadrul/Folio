@@ -505,6 +505,25 @@ void main() {
     },
   );
 
+  test('reads a chapter heading that appears late in the document', () async {
+    final padding = List.filled(600, '<p>Front matter text.</p>').join();
+    final chapter =
+        '''
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><title>Two</title></head>
+<body>$padding<h3>Late Heading</h3><p>Second chapter.</p></body></html>
+''';
+    final entries = epub2Entries(
+      ncx: epub2Ncx.replaceFirst('<text>Two</text>', '<text></text>'),
+    )..['OEBPS/text/ch2.xhtml'] = chapter;
+    final file = await EpubFixture.write(tmp, entries);
+
+    final book = await loader().load(file.path);
+    final second = book.chapters.firstWhere((c) => c.index == 1);
+
+    expect(second.title, 'Late Heading');
+  });
+
   test(
     'opening a new book extracts and parses through the isolate runner',
     () async {
