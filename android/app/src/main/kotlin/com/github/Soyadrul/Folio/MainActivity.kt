@@ -41,7 +41,19 @@ class MainActivity : FlutterActivity() {
         // The launch intent must be captured before super.onCreate(), because
         // configureFlutterEngine() runs inside it and Dart may ask for the
         // pending file very soon afterwards.
-        initialUriString = intent?.dataString
+        //
+        // Android re-delivers the original VIEW intent when the activity is
+        // recreated (process death, "return from Recents"). That book was
+        // already opened once; replaying it would push it on top of the library
+        // every time. A savedInstanceState means a recreation, and the history
+        // flag marks a launch that comes from the task's back stack.
+        val launchedFromHistory =
+            intent?.flags?.and(Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0
+        initialUriString = if (savedInstanceState == null && !launchedFromHistory) {
+            intent?.dataString
+        } else {
+            null
+        }
         super.onCreate(savedInstanceState)
     }
 
