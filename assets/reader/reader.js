@@ -10,6 +10,7 @@
       fontFamily: 'Georgia, "Noto Serif", serif',
       textAlign: 'justify',
       hyphenation: true,
+      margin: 16,
       foreground: '#1a1a2e',
       pageAnimation: true,
       tapZones: true,
@@ -92,6 +93,9 @@
     root.style.setProperty('--folio-fg', s.foreground);
     root.style.setProperty('--folio-align', s.textAlign);
     root.style.setProperty('--folio-font-family', s.fontFamily);
+    // The side margin lives inside the page so taps in that strip still reach
+    // the reader instead of a dead Flutter padding around the WebView.
+    root.style.setProperty('--folio-margin', (Number(s.margin) || 0) + 'px');
     // Hyphenation only helps justified text, and the Settings switch is
     // disabled for other alignments. Keep the CSS in step with the UI so the
     // WebView cannot hyphenate when the user turned it off.

@@ -456,14 +456,7 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
               ? _buildLoading(background, foreground)
               : Stack(
                   children: [
-                    Positioned.fill(
-                      child: Padding(
-                        padding: EdgeInsets.symmetric(
-                          horizontal: settings.marginHorizontal,
-                        ),
-                        child: _buildContent(document, settings),
-                      ),
-                    ),
+                    Positioned.fill(child: _buildContent(document, settings)),
                     if (_runtimeError != null)
                       Positioned(
                         left: 16,

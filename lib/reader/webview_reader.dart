@@ -238,7 +238,6 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
         _applySettingsAndRestore(
           modeChanged: modeChanged,
           reflow: typographyChanged || marginChanged,
-          marginChanged: marginChanged,
         ),
       );
     });
@@ -247,7 +246,6 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
   Future<void> _applySettingsAndRestore({
     required bool modeChanged,
     required bool reflow,
-    required bool marginChanged,
   }) async {
     await _ensureFontFaces();
     // Every setting lives in the same object, so pushing the whole settings
@@ -265,16 +263,6 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
     }
     if (!reflow) return;
     await _goToProgress(_lastProgress, _lastElement);
-    if (marginChanged) {
-      // Margins are Flutter padding, so the platform view receives its new
-      // width only after the next frame. Restore the position once more when
-      // the WebView has actually resized, otherwise the page count is stale.
-      await WidgetsBinding.instance.endOfFrame;
-      if (!mounted) return;
-      await Future<void>.delayed(const Duration(milliseconds: 60));
-      if (!mounted) return;
-      await _goToProgress(_lastProgress, _lastElement);
-    }
   }
 
   Future<void> _loadShell() async {
@@ -354,6 +342,7 @@ class WebViewReaderState extends ConsumerState<WebViewReader>
           ? 'right'
           : 'left',
       'hyphenation': settings.hyphenation,
+      'margin': settings.marginHorizontal,
       'foreground':
           '#${readerTextColor(settings.readingMode, brightness).toARGB32().toRadixString(16).padLeft(8, '0').substring(2)}',
       'pageAnimation': settings.pageAnimation,

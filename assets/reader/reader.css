@@ -7,6 +7,7 @@
   --folio-page-height: 640px;
   --folio-align: justify;
   --folio-font-family: Georgia, 'Noto Serif', serif;
+  --folio-margin: 16px;
   --folio-hyphens: auto;
   --folio-image-max-height: 600px;
 }
@@ -60,6 +61,9 @@ body {
   text-align: var(--folio-align);
   hyphens: var(--folio-hyphens);
   -webkit-hyphens: var(--folio-hyphens);
+  /* The side margin is part of the page, not Flutter padding around the
+     WebView, so a tap in the margin strip still reaches the reader. */
+  padding: 0 var(--folio-margin);
   overflow-wrap: break-word;
   word-wrap: break-word;
   overflow-anchor: none;
@@ -289,9 +293,13 @@ body.folio-book #folio-scroll {
 
 body.folio-book #folio-content {
   height: var(--folio-page-height);
-  width: var(--folio-page-width);
-  column-width: var(--folio-page-width);
-  column-gap: 0;
+  /* One column per page. The column plus its gap spans one viewport width and
+     the left margin shifts the text by the same inset on every page, so pages
+     keep equal side margins while the page step stays the viewport width. */
+  margin-left: var(--folio-margin);
+  width: calc(var(--folio-page-width) - 2 * var(--folio-margin));
+  column-width: calc(var(--folio-page-width) - 2 * var(--folio-margin));
+  column-gap: calc(2 * var(--folio-margin));
   column-fill: auto;
   min-height: 0;
   padding: 0;

@@ -11,6 +11,7 @@ import 'package:folio/models/app_settings.dart';
 import 'package:folio/models/book.dart';
 import 'package:folio/providers/library_provider.dart';
 import 'package:folio/providers/settings_provider.dart';
+import 'package:folio/reader/flutter_reader.dart';
 import 'package:folio/reader/keep_screen_on.dart';
 import 'package:folio/reader/reader_system_ui.dart';
 import 'package:folio/reader/reading_position.dart';
@@ -553,6 +554,22 @@ void main() {
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
+  });
+
+  testWidgets('the content view spans the full width so edge taps reach it', (
+    tester,
+  ) async {
+    final book = Book(path: epub.path, title: 'Old Book', author: 'Jane Doe');
+    final loader = EpubLoader(cacheRoot: Directory(p.join(tmp.path, 'cache')));
+    await _pushReader(tester, book: book, loader: loader);
+
+    // The margin is applied inside the page. A Flutter Padding around the
+    // content view would make the left/right strips dead zones, which is where
+    // people tap to turn pages.
+    expect(
+      tester.getSize(find.byType(FlutterReader)).width,
+      tester.getSize(find.byType(ReaderScreen)).width,
+    );
   });
 
   test('the bottom bar omits an empty chapter label', () {

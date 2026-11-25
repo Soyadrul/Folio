@@ -914,6 +914,16 @@ test('CSS hyphenation follows both the switch and justified text', async () => {
   );
 });
 
+test('the page margin is exposed to CSS', () => {
+  const reader = loadReader();
+  reader.folio.init(defaults({ margin: 20 }));
+  const root = reader.document.documentElement;
+  assert.equal(root.style.properties['--folio-margin'], '20px');
+
+  reader.folio.setSettings({ margin: 32 });
+  assert.equal(root.style.properties['--folio-margin'], '32px');
+});
+
 test('no progress is posted before the first chapter is installed', async () => {
   const { folio, posts } = loadReader();
 
