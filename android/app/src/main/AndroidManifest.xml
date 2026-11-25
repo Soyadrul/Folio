@@ -87,8 +87,4 @@
 
     </application>
 
-    <!-- permission_handler is compiled against a newer SDK than some devices
-         targeted by the app; allow it to be linked. -->
-    <uses-sdk tools:overrideLibrary="io.flutter.plugins.permissionhandler" />
-
 </manifest>
