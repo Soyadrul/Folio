@@ -577,6 +577,50 @@ void main() {
     expect(progressLabel('Ch. 1 / 2', 37), 'Ch. 1 / 2   ·   37%');
   });
 
+  testWidgets('a chapter that fits one screen is not counted as read', (
+    tester,
+  ) async {
+    final book = Book(path: epub.path, title: 'Old Book', author: 'Jane Doe');
+    final loader = EpubLoader(cacheRoot: Directory(p.join(tmp.path, 'cache')));
+    await _pushReader(tester, book: book, loader: loader);
+
+    final state = tester.state<ReaderScreenState>(find.byType(ReaderScreen));
+    state.createCallbacks().onProgress!(
+      const ReaderProgressEvent(
+        chapterIndex: 0,
+        progress: 1,
+        page: 1,
+        pages: 1,
+        element: 'start',
+      ),
+    );
+
+    // The whole chapter is visible, but the reader only opened it: one of two
+    // chapters is behind the reader, so the book is at 0 %, not 50 %.
+    expect(await _closeAndReadOverall(tester, book), closeTo(0, 0.001));
+  });
+
+  testWidgets('the final short chapter still completes the book', (
+    tester,
+  ) async {
+    final book = Book(path: epub.path, title: 'Old Book', author: 'Jane Doe');
+    final loader = EpubLoader(cacheRoot: Directory(p.join(tmp.path, 'cache')));
+    await _pushReader(tester, book: book, loader: loader);
+
+    final state = tester.state<ReaderScreenState>(find.byType(ReaderScreen));
+    state.createCallbacks().onProgress!(
+      const ReaderProgressEvent(
+        chapterIndex: 1,
+        progress: 1,
+        page: 1,
+        pages: 1,
+        element: 'sec',
+      ),
+    );
+
+    expect(await _closeAndReadOverall(tester, book), closeTo(1, 0.001));
+  });
+
   testWidgets('system back returns to the previous location before leaving', (
     tester,
   ) async {
@@ -653,6 +697,20 @@ void main() {
     expect(find.byType(ReaderScreen), findsNothing);
     expect(find.text('books: 0'), findsOneWidget);
   });
+}
+
+/// Unmounts the reader like closing the screen does, then returns the overall
+/// progress persisted for [book].
+Future<double> _closeAndReadOverall(WidgetTester tester, Book book) async {
+  await tester.pumpWidget(const SizedBox.shrink());
+  await tester.pump(const Duration(milliseconds: 100));
+
+  final prefs = await SharedPreferences.getInstance();
+  final raw = prefs.getString('folio_reading_position:${book.path}');
+  expect(raw, isNotNull, reason: 'the reader must save its position on close');
+  return ReadingPosition.fromJson(
+    Map<String, dynamic>.from(jsonDecode(raw!)),
+  ).overallProgress;
 }
 
 /// Pushes a reader on top of a stand-in home screen, so a Back gesture has a

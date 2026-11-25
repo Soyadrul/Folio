@@ -10,6 +10,7 @@ import '../models/app_settings.dart';
 import '../models/book.dart';
 import '../providers/library_provider.dart';
 import '../providers/settings_provider.dart';
+import '../reader/book_progress.dart';
 import '../reader/flutter_reader.dart';
 import '../reader/keep_screen_on.dart';
 import '../reader/reader_content_controller.dart';
@@ -228,7 +229,7 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
         // page, which has no progress of its own. Keep the last whole-book
         // progress instead of resetting the library card to zero.
         _lastOverallProgress =
-            _computeOverallProgress(document, index, progress) ??
+            overallProgressFor(document, index, progress) ??
             saved?.overallProgress ??
             0;
       });
@@ -280,10 +281,11 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
     _clearRuntimeError();
     final document = _document;
     if (document != null) {
-      final overall = _computeOverallProgress(
+      final overall = overallProgressFor(
         document,
         event.chapterIndex,
         event.progress,
+        pages: event.pages,
       );
       if (overall != null) _lastOverallProgress = overall;
     }
@@ -386,25 +388,6 @@ class ReaderScreenState extends ConsumerState<ReaderScreen>
 
   /// Book-wide progress for [index], or null when [index] is an auxiliary page
   /// that is not part of the reading flow (footnotes, colophon, ...).
-  double? _computeOverallProgress(
-    EpubDocument document,
-    int index,
-    double progress,
-  ) {
-    if (document.totalChapterBytes == 0) return null;
-    final position = document.chapters.indexWhere((c) => c.index == index);
-    if (position < 0) return null;
-    var before = 0;
-    for (var i = 0; i < position; i++) {
-      before += document.chapters[i].byteSize;
-    }
-    final current = document.chapters[position].byteSize;
-    return ((before + current * progress) / document.totalChapterBytes).clamp(
-      0.0,
-      1.0,
-    );
-  }
-
   // ── Build ─────────────────────────────────────────────────────────────────
 
   @override
